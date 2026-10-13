@@ -45,6 +45,8 @@
 #include "websocket_protocol.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
+#include "car_monitor.h"  // 车载监测模块
+#include "car_ui_helper.h"  // 车载界面辅助类
 
 #include <cstring>
 #include <esp_log.h>
@@ -591,6 +593,43 @@ void Application::Start() {
         my_info_.SetPlayVoiceCallback([this](const std::string& text) {
             this->PlaySound(text);
         });
+    }
+
+    /* 初始化车载监测系统 */
+    ESP_LOGI(TAG, "Initializing CarMonitor (demo mode)...");
+    if (!CarMonitor::Init(true)) {  // true = 演示模式（使用虚拟传感器数据）
+        ESP_LOGE(TAG, "Failed to initialize CarMonitor");
+    } else {
+        CarMonitor* car_monitor = CarMonitor::GetInstance();
+        if (car_monitor != nullptr) {
+            // 启动监测任务（栈大小4KB，优先级5）
+            if (!car_monitor->StartMonitorTask(4096, 5)) {
+                ESP_LOGE(TAG, "Failed to start CarMonitor task");
+            } else {
+                ESP_LOGI(TAG, "CarMonitor task started successfully");
+
+                // 启动车载监测测试任务（用于验证功能）
+                extern bool start_car_monitor_test_task();
+                if (start_car_monitor_test_task()) {
+                    ESP_LOGI(TAG, "CarMonitor test task started");
+                }
+
+                // 初始化车载界面（LVGL UI）
+                ESP_LOGI(TAG, "Initializing CarUI...");
+                if (CarUIHelper::Initialize()) {
+                    ESP_LOGI(TAG, "CarUI initialized successfully");
+
+                    // 启动界面更新任务（500ms 更新一次）
+                    if (CarUIHelper::StartUpdateTask(500)) {
+                        ESP_LOGI(TAG, "CarUI update task started");
+                    } else {
+                        ESP_LOGE(TAG, "Failed to start CarUI update task");
+                    }
+                } else {
+                    ESP_LOGE(TAG, "Failed to initialize CarUI");
+                }
+            }
+        }
     }
 
     // 设置音频服务回调

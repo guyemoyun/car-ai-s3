@@ -26,6 +26,9 @@ set(SOURCES "audio/audio_codec.cc"
             "led_ctrl.cc"
             "dht11_sensor.cc"
             "myinfo.cc"
+            "car_monitor_helper.cc"
+            "car_monitor_test_task.cc"
+            "car_ui_helper.cc"
             "main.cc"
             )
 
@@ -312,6 +315,7 @@ endif()
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
+                    REQUIRES car_monitor esp_lcd_touch_ft6x36 app_update efuse esp_adc esp_lcd esp_partition esp_hw_support spi_flash esp_timer esp_event esp_app_format esp_psram esp-opus
                     WHOLE_ARCHIVE
                     )
 
