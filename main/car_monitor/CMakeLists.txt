@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "car_snapshot.cc"
+        "virtual_sensors.cc"
+        "car_monitor.cc"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        "freertos"
+        "esp_log"
+        "driver"
+)
