@@ -446,7 +446,7 @@ public:
     InitializeSt7796Display(); // 初始化ST7796显示屏
 #endif
 
-    //InitializeTouch();   // 初始化触摸屏
+    InitializeTouch();   // 初始化触摸屏
     InitializeButtons(); // 初始化按钮功能
     InitializeCamera();  // 初始化摄像头
 

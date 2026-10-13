@@ -32,7 +32,7 @@
 #define AUDIO_CODEC_ES7210_ADDR 0x82                      // ES7210 ADC设备地址：0x82
 
 // 按钮和LED引脚配置
-#define BUILTIN_LED_GPIO GPIO_NUM_48        // 板载LED引脚：GPIO48
+#define BUILTIN_LED_GPIO GPIO_NUM_10        // 板载LED引脚：GPIO10（灌电流，低电平点亮）
 #define BOOT_BUTTON_GPIO GPIO_NUM_0         // 启动按钮引脚：GPIO0
 #define VOLUME_UP_BUTTON_GPIO GPIO_NUM_NC   // 音量加按钮引脚：未连接(NC)
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC // 音量减按钮引脚：未连接(NC)

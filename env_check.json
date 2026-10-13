@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "C:\Users\guyem\.claude\skills\esp32s3-dev\scripts\detect_env.py", line 643, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "C:\Users\guyem\.claude\skills\esp32s3-dev\scripts\detect_env.py", line 634, in main
+    print(json.dumps(rep.to_dict(title), ensure_ascii=False, indent=2))
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'gbk' codec can't encode character '\ufffd' in position 2821: illegal multibyte sequence
