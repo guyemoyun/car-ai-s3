@@ -10,19 +10,15 @@
 
 基于你的反馈，我们完成了以下改进：
 
-### 问题 1: ❌ 屏保冲突
-**原问题**: 车载界面与原有的星空屏保冲突  
-**解决方案**: ✅ 页面管理器架构，车载监测页面自动禁用屏保
-
-### 问题 2: ❌ 界面遮挡
+### 问题 1: ❌ 界面遮挡
 **原问题**: 车载界面挡住了小智聊天界面  
 **解决方案**: ✅ 多页面架构，用户可以在聊天页和监测页之间滑动切换
 
-### 问题 3: ❌ 按键无反馈
+### 问题 2: ❌ 按键无反馈
 **原问题**: 点击按钮没有视觉反馈  
 **解决方案**: ✅ 添加按下效果（颜色变深 + 阴影）+ Toast 提示消息
 
-### 问题 4: ❌ 滚动逻辑不佳
+### 问题 3: ❌ 滚动逻辑不佳
 **原问题**: 需要类似手机的触摸滑动  
 **解决方案**: ✅ LVGL TabView 原生支持手势滑动，左右滑动切换页面
 
@@ -36,7 +32,6 @@
 ┌─────────────────────────────────────────┐
 │        AppUIManager（单例）              │
 │  • 统一管理所有页面                      │
-│  • 控制屏保启停                          │
 │  • 提供 Toast 提示                       │
 └──────────────┬──────────────────────────┘
                │
@@ -59,10 +54,8 @@
 页面特性：
   • 聊天页（PAGE_CHAT）
     - 默认页面
-    - 允许屏保（空闲后自动启动星空屏保）
   
   • 车载监测页（PAGE_CAR_MONITOR）
-    - 切换到该页面时自动禁用屏保
     - 只在该页面时更新车载 UI（节省 CPU）
   
   • 设置页（PAGE_SETTINGS）
@@ -152,30 +145,18 @@ CarUIHelper::StartUpdateTask(500);
 // 方式 2: 程序控制
 AppUIManager* ui_mgr = AppUIManager::GetInstance();
 
-// 切换到车载监测页面（禁用屏保）
-ui_mgr->SwitchToPage(PAGE_CAR_MONITOR, true);
+// 切换到车载监测页面
+ui_mgr->SwitchToPage(PAGE_CAR_MONITOR);
 
-// 切换到聊天页面（允许屏保）
-ui_mgr->SwitchToPage(PAGE_CHAT, false);
+// 切换到聊天页面
+ui_mgr->SwitchToPage(PAGE_CHAT);
 
 // 或者使用便捷函数
 CarUIHelper::SwitchToCarMonitorPage();
 CarUIHelper::SwitchToChatPage();
 ```
 
-### 3. 屏保控制
-
-```cpp
-AppUIManager* ui_mgr = AppUIManager::GetInstance();
-
-// 禁用屏保（例如：播放视频时）
-ui_mgr->SetScreensaverEnabled(false);
-
-// 启用屏保
-ui_mgr->SetScreensaverEnabled(true);
-```
-
-### 4. Toast 提示消息
+### 3. Toast 提示消息
 
 ```cpp
 AppUIManager* ui_mgr = AppUIManager::GetInstance();
@@ -198,12 +179,10 @@ ui_mgr->ShowToast("切换车辆状态", 1500);
    ↓
 2. 显示聊天页面（默认）
    • 可以正常使用小智聊天
-   • 空闲后自动启动星空屏保
    ↓
 3. 用户向左滑动屏幕
    ↓
 4. 切换到车载监测页面
-   • 屏保自动停止
    • 显示环境数据、车辆状态、告警信息
    • 三个按钮可交互
    ↓
@@ -215,7 +194,6 @@ ui_mgr->ShowToast("切换车辆状态", 1500);
 6. 用户向右滑动屏幕
    ↓
 7. 回到聊天页面
-   • 屏保重新允许
 ```
 
 ### 界面布局（车载监测页）
@@ -300,11 +278,6 @@ I (xxx) PageManager: Switched to page: 0 (CHAT)
   - [ ] 向左滑动 → 切换到车载监测页
   - [ ] 向右滑动 → 回到聊天页
   - [ ] 切换平滑，无卡顿
-
-- [ ] **屏保控制**
-  - [ ] 聊天页：空闲后自动启动屏保
-  - [ ] 车载监测页：屏保不启动
-  - [ ] 回到聊天页：屏保重新允许
 
 - [ ] **按钮反馈**
   - [ ] 点击"切换状态" → 按钮变深蓝 + Toast 提示
@@ -433,7 +406,6 @@ void UpdateTaskFunction() {
 - [x] application.cc 集成 AppUIManager
 - [x] CMakeLists.txt 更新（组件 + main）
 - [x] Toast 提示消息功能
-- [x] 屏保自动控制逻辑
 - [x] 页面切换手势支持
 - [x] CPU 优化（按页面更新）
 - [ ] 编译验证（待执行）
@@ -452,10 +424,7 @@ void UpdateTaskFunction() {
 AppUIManager::Initialize(LcdDisplay* display);
 
 // 切换页面
-AppUIManager::GetInstance()->SwitchToPage(PAGE_CAR_MONITOR, true);
-
-// 控制屏保
-AppUIManager::GetInstance()->SetScreensaverEnabled(false);
+AppUIManager::GetInstance()->SwitchToPage(PAGE_CAR_MONITOR);
 
 // 显示 Toast
 AppUIManager::GetInstance()->ShowToast("提示消息", 2000);
@@ -485,4 +454,4 @@ CarUIHelper::SwitchToChatPage();
 
 **架构升级状态**: 代码 100% 完成，等待构建验证 ✅
 
-**改进总结**: 多页面架构 + 手势滑动 + 按钮反馈 + Toast 提示 + 屏保智能控制
+**改进总结**: 多页面架构 + 手势滑动 + 按钮反馈 + Toast 提示

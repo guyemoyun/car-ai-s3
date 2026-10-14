@@ -105,7 +105,6 @@ I (xxx) car_monitor: CarMonitor initialized in DEMO mode
    - 预期：淡入淡出过渡动画
    - 预期日志：`I (xxx) gec-esp32s3-board: SW3 clicked - switching screen`
    - 预期：屏幕显示车载监测数据
-   - 预期：屏保自动停止
 3. **再次单击 SW3** → 回到聊天屏幕
 4. **验证数据更新** → 车载数据每 500ms 更新一次
 
@@ -119,7 +118,6 @@ I (xxx) car_monitor: CarMonitor initialized in DEMO mode
 │  小智聊天界面                │
 │  （正常功能）                │
 │  可以与小智对话              │
-│  空闲时屏保可启动            │
 └─────────────────────────────┘
 ```
 
