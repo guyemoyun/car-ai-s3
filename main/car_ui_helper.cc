@@ -1,11 +1,12 @@
 /**
  * @file car_ui_helper.cc
- * @brief 车载监测界面辅助函数实现
+ * @brief 车载监测界面辅助函数实现（基于 ScreenManager 架构）
  */
 
 #include "car_ui_helper.h"
-#include "car_monitor/car_monitor.h"
+#include "car_monitor.h"
 #include "car_monitor_helper.h"
+#include "screen_manager.h"
 #include <esp_log.h>
 #include <esp_lvgl_port.h>
 #include <freertos/FreeRTOS.h>
@@ -14,42 +15,34 @@
 #define TAG "CarUIHelper"
 
 // 静态成员初始化
-CarUI* CarUIHelper::ui_instance_ = nullptr;
 TaskHandle_t CarUIHelper::update_task_ = nullptr;
 
-bool CarUIHelper::Initialize(lv_obj_t* parent)
+bool CarUIHelper::Initialize()
 {
-    if (ui_instance_ != nullptr) {
-        ESP_LOGW(TAG, "CarUI already initialized");
-        return true;
-    }
-
-    // 创建 UI 实例（必须在 LVGL 锁内创建）
-    if (lvgl_port_lock(0)) {
-        ui_instance_ = new CarUI(parent);
-
-        // 设置按钮回调
-        ui_instance_->SetToggleVehicleCallback(OnToggleVehicle);
-        ui_instance_->SetConfirmAlertCallback(OnConfirmAlert);
-        ui_instance_->SetTestAlertCallback(OnTestAlert);
-
-        lvgl_port_unlock();
-
-        ESP_LOGI(TAG, "CarUI initialized successfully");
-        return true;
-    } else {
-        ESP_LOGE(TAG, "Failed to acquire LVGL lock");
+    // 新架构下，UI 由 ScreenManager 统一管理
+    ScreenManager* scr_mgr = ScreenManager::GetInstance();
+    if (scr_mgr == nullptr) {
+        ESP_LOGE(TAG, "ScreenManager not initialized");
         return false;
     }
+
+    CarUI* ui = scr_mgr->GetCarUI();
+    if (ui == nullptr) {
+        ESP_LOGE(TAG, "CarUI not available from ScreenManager");
+        return false;
+    }
+
+    // 设置按钮回调
+    ui->SetToggleVehicleCallback(OnToggleVehicle);
+    ui->SetConfirmAlertCallback(OnConfirmAlert);
+    ui->SetTestAlertCallback(OnTestAlert);
+
+    ESP_LOGI(TAG, "CarUIHelper initialized successfully");
+    return true;
 }
 
 bool CarUIHelper::StartUpdateTask(uint32_t update_interval_ms)
 {
-    if (ui_instance_ == nullptr) {
-        ESP_LOGE(TAG, "CarUI not initialized, call Initialize() first");
-        return false;
-    }
-
     if (update_task_ != nullptr) {
         ESP_LOGW(TAG, "Update task already running");
         return true;
@@ -85,7 +78,13 @@ void CarUIHelper::StopUpdateTask()
 
 void CarUIHelper::UpdateUI()
 {
-    if (ui_instance_ == nullptr) {
+    ScreenManager* scr_mgr = ScreenManager::GetInstance();
+    if (scr_mgr == nullptr) {
+        return;
+    }
+
+    CarUI* ui = scr_mgr->GetCarUI();
+    if (ui == nullptr) {
         return;
     }
 
@@ -98,26 +97,47 @@ void CarUIHelper::UpdateUI()
     CarSnapshot snapshot;
     if (monitor->GetSnapshot(&snapshot)) {
         // 在 LVGL 锁内更新 UI
-        if (lvgl_port_lock(0)) {
-            ui_instance_->Update(snapshot);
+        if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
+            ui->Update(snapshot);
             lvgl_port_unlock();
         }
     }
 }
 
-void CarUIHelper::SetVisible(bool visible)
+void CarUIHelper::SwitchToCarMonitorScreen()
 {
-    if (ui_instance_ != nullptr) {
-        if (lvgl_port_lock(0)) {
-            ui_instance_->SetVisible(visible);
-            lvgl_port_unlock();
-        }
+    ScreenManager* scr_mgr = ScreenManager::GetInstance();
+    if (scr_mgr != nullptr) {
+        scr_mgr->SwitchToScreen(SCREEN_CAR_MONITOR, true);
+        ESP_LOGI(TAG, "Switched to car monitor screen");
+    }
+}
+
+void CarUIHelper::SwitchToChatScreen()
+{
+    ScreenManager* scr_mgr = ScreenManager::GetInstance();
+    if (scr_mgr != nullptr) {
+        scr_mgr->SwitchToScreen(SCREEN_CHAT, true);
+        ESP_LOGI(TAG, "Switched to chat screen");
+    }
+}
+
+void CarUIHelper::ToggleScreen()
+{
+    ScreenManager* scr_mgr = ScreenManager::GetInstance();
+    if (scr_mgr != nullptr) {
+        scr_mgr->SwitchToNextScreen();
+        ESP_LOGI(TAG, "Toggled to next screen");
     }
 }
 
 CarUI* CarUIHelper::GetInstance()
 {
-    return ui_instance_;
+    ScreenManager* scr_mgr = ScreenManager::GetInstance();
+    if (scr_mgr == nullptr) {
+        return nullptr;
+    }
+    return scr_mgr->GetCarUI();
 }
 
 void CarUIHelper::UpdateTaskFunction(void* arg)
@@ -128,8 +148,11 @@ void CarUIHelper::UpdateTaskFunction(void* arg)
     ESP_LOGI(TAG, "CarUI update task running");
 
     while (true) {
-        // 更新 UI
-        UpdateUI();
+        // 只在车载监测屏幕时更新 UI（节省 CPU）
+        ScreenManager* scr_mgr = ScreenManager::GetInstance();
+        if (scr_mgr != nullptr && scr_mgr->GetCurrentScreen() == SCREEN_CAR_MONITOR) {
+            UpdateUI();
+        }
 
         // 等待下一个周期
         vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(interval_ms));

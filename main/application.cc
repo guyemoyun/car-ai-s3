@@ -45,8 +45,9 @@
 #include "websocket_protocol.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
-#include "car_monitor.h"  // 车载监测模块
-#include "car_ui_helper.h"  // 车载界面辅助类
+#include "car_monitor.h"      // 车载监测模块
+#include "car_ui_helper.h"    // 车载界面辅助类
+#include "screen_manager.h"   // 屏幕管理器
 
 #include <cstring>
 #include <esp_log.h>
@@ -595,6 +596,14 @@ void Application::Start() {
         });
     }
 
+    /* 初始化屏幕管理器（独立屏幕架构）*/
+    ESP_LOGI(TAG, "Initializing ScreenManager...");
+    if (!ScreenManager::Initialize(board.GetDisplay())) {
+        ESP_LOGE(TAG, "Failed to initialize ScreenManager");
+    } else {
+        ESP_LOGI(TAG, "ScreenManager initialized successfully");
+    }
+
     /* 初始化车载监测系统 */
     ESP_LOGI(TAG, "Initializing CarMonitor (demo mode)...");
     if (!CarMonitor::Init(true)) {  // true = 演示模式（使用虚拟传感器数据）
@@ -608,16 +617,10 @@ void Application::Start() {
             } else {
                 ESP_LOGI(TAG, "CarMonitor task started successfully");
 
-                // 启动车载监测测试任务（用于验证功能）
-                extern bool start_car_monitor_test_task();
-                if (start_car_monitor_test_task()) {
-                    ESP_LOGI(TAG, "CarMonitor test task started");
-                }
-
-                // 初始化车载界面（LVGL UI）
-                ESP_LOGI(TAG, "Initializing CarUI...");
+                // 初始化车载界面辅助类（连接 UI 与 CarMonitor）
+                ESP_LOGI(TAG, "Initializing CarUIHelper...");
                 if (CarUIHelper::Initialize()) {
-                    ESP_LOGI(TAG, "CarUI initialized successfully");
+                    ESP_LOGI(TAG, "CarUIHelper initialized successfully");
 
                     // 启动界面更新任务（500ms 更新一次）
                     if (CarUIHelper::StartUpdateTask(500)) {
@@ -626,7 +629,13 @@ void Application::Start() {
                         ESP_LOGE(TAG, "Failed to start CarUI update task");
                     }
                 } else {
-                    ESP_LOGE(TAG, "Failed to initialize CarUI");
+                    ESP_LOGE(TAG, "Failed to initialize CarUIHelper");
+                }
+
+                // 启动车载监测测试任务（用于验证功能）
+                extern bool start_car_monitor_test_task();
+                if (start_car_monitor_test_task()) {
+                    ESP_LOGI(TAG, "CarMonitor test task started");
                 }
             }
         }

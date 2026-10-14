@@ -29,6 +29,7 @@ set(SOURCES "audio/audio_codec.cc"
             "car_monitor_helper.cc"
             "car_monitor_test_task.cc"
             "car_ui_helper.cc"
+            "screen_manager.cc"
             "main.cc"
             )
 

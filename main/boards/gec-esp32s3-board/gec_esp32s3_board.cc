@@ -13,6 +13,7 @@
 #include "esp32_camera.h"           // ESP32摄像头
 #include "i2c_device.h"             // I2C设备基类
 #include "wifi_board.h"             // WiFi板基类定义
+#include "car_ui_helper.h"          // 车载界面辅助类
 
 #include "esp_lcd_st7796.h"       // ST7796 LCD驱动
 #include "esp_lcd_touch_ft6x36.h" // FT6X36触摸屏驱动
@@ -26,6 +27,12 @@
 #include <wifi_station.h>         // WiFi站模式
 
 #define TAG "gec-esp32s3-board" // 日志标签
+
+// 全局函数：切换屏幕（由 SW3 按键调用）
+void ToggleCarMonitorScreen()
+{
+  CarUIHelper::ToggleScreen();
+}
 
 // 声明LVGL字体资源
 LV_FONT_DECLARE(font_puhui_20_4);   // 普惠字体20号4bpp
@@ -353,11 +360,11 @@ private:
             },
     };
     esp_lcd_panel_io_handle_t tp_io_handle = NULL; // 触摸屏IO句柄
-#ifdef TP_DRIVER_FT5X06    
+#ifdef TP_DRIVER_FT5X06
     // 配置I2C触摸屏IO参数
     esp_lcd_panel_io_i2c_config_t tp_io_config =
         ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
-    tp_io_config.scl_speed_hz = 400000; // I2C时钟频率400kHz
+    tp_io_config.scl_speed_hz = 400000; // 恢复到 400kHz（稳定可靠）
 
     // 创建I2C触摸屏IO接口
     esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
@@ -368,7 +375,7 @@ private:
     // 配置I2C触摸屏IO参数
     esp_lcd_panel_io_i2c_config_t tp_io_config =
         ESP_LCD_TOUCH_IO_I2C_FT6x36_CONFIG();
-    tp_io_config.scl_speed_hz = 400000; // I2C时钟频率400kHz
+    tp_io_config.scl_speed_hz = 400000; // 恢复到 400kHz（稳定可靠）
 
     // 创建I2C触摸屏IO接口
     esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
@@ -448,6 +455,15 @@ public:
 
     InitializeTouch();   // 初始化触摸屏
     InitializeButtons(); // 初始化按钮功能
+
+    // 初始化 SW3 用户按键（GPIO11）用于切换屏幕
+    Button* sw3_button = new Button(GPIO_NUM_11, true, 0, 0, false);
+    sw3_button->OnClick([](){
+      ESP_LOGI(TAG, "SW3 clicked - switching screen");
+      extern void ToggleCarMonitorScreen();
+      ToggleCarMonitorScreen();
+    });
+
     InitializeCamera();  // 初始化摄像头
 
     // 恢复背光亮度设置

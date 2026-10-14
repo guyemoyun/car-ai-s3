@@ -1,27 +1,25 @@
 /**
  * @file car_ui_helper.h
- * @brief 车载监测界面辅助函数
+ * @brief 车载监测界面辅助函数（基于 ScreenManager 架构）
  * @details 提供 CarMonitor 与 CarUI 之间的集成接口
  */
 
 #pragma once
 
-#include "car_monitor/car_ui.h"
-#include <lvgl.h>
+#include "car_ui.h"  // ← 修复：不需要 car_monitor/ 前缀
 
 /**
  * @class CarUIHelper
  * @brief 车载界面辅助类
- * @details 管理 CarUI 实例，提供便捷的集成接口
+ * @details 配合 ScreenManager 管理车载监测界面
  */
 class CarUIHelper {
 public:
     /**
-     * @brief 初始化车载界面
-     * @param parent LVGL 父对象（nullptr 使用默认屏幕）
+     * @brief 初始化车载界面（从 ScreenManager 获取实例并设置回调）
      * @return true=成功, false=失败
      */
-    static bool Initialize(lv_obj_t* parent = nullptr);
+    static bool Initialize();
 
     /**
      * @brief 启动界面更新任务
@@ -41,10 +39,19 @@ public:
     static void UpdateUI();
 
     /**
-     * @brief 显示/隐藏界面
-     * @param visible true=显示, false=隐藏
+     * @brief 切换到车载监测屏幕
      */
-    static void SetVisible(bool visible);
+    static void SwitchToCarMonitorScreen();
+
+    /**
+     * @brief 切换到聊天屏幕
+     */
+    static void SwitchToChatScreen();
+
+    /**
+     * @brief 在两个屏幕之间切换
+     */
+    static void ToggleScreen();
 
     /**
      * @brief 获取 CarUI 实例
@@ -53,7 +60,6 @@ public:
     static CarUI* GetInstance();
 
 private:
-    static CarUI* ui_instance_;       ///< UI 实例
     static TaskHandle_t update_task_; ///< 更新任务句柄
 
     /**
