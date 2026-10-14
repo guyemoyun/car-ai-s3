@@ -12,16 +12,6 @@
  * - 聊天消息显示（用户/助手/系统消息）
  * - 表情图标显示
  * - 预览图片显示
- * - 星空屏保（60颗星星 + 10架彩色飞机）
- * 
- * 屏保特性：
- * - 星星：60颗，3x3像素，向下漂移，闪烁效果
- * - 飞机：10架，20x10像素，10种不同颜色
- * - 飞机颜色：红色、青色、黄色、浅绿色、粉色、紫色、浅橙色、深青色、热粉色、酸橙绿
- * - 飞机运动：水平向右飞行，速度1-4像素/帧，垂直速度-1到1像素/帧
- * - 飞机分布：初始位置均匀分布在5行x2列的网格中
- * - 动态效果：随机速度变化（模拟气流），边界反弹，透明度闪烁
- * - 更新频率：80ms（12.5 FPS）
  * 
  * 类继承关系：
  * Display (基类)
@@ -39,7 +29,6 @@
  * 4. 调用SetEmotion()设置表情图标
  * 5. 调用SetStatus()设置状态栏文本
  * 6. 调用SetTheme()切换主题
- * 7. 调用StartScreensaver()/StopScreensaver()控制屏保
  * 
  * @note 本文件依赖于LVGL图形库
  * @see lcd_display.cc 实现文件
@@ -83,23 +72,6 @@ protected:
     lv_obj_t* side_bar_ = nullptr;      // 侧边栏对象
     lv_obj_t* preview_image_ = nullptr; // 预览图片对象
 
-    // 屏保相关对象
-    lv_obj_t* screensaver_layer_ = nullptr;      // 屏保图层对象
-    lv_timer_t* screensaver_timer_ = nullptr;     // 屏保定时器对象
-    std::vector<lv_obj_t*> screensaver_stars_;    // 星星对象数组
-    bool screensaver_running_ = false;             // 屏保运行标志
-
-    struct ScreensaverShip {  // 屏保飞机结构体
-        lv_obj_t* obj = nullptr;  // 飞机对象
-        lv_coord_t x = 0;         // X坐标
-        lv_coord_t y = 0;         // Y坐标
-        int dx = 0;              // 水平速度
-        int dy = 0;              // 垂直速度
-        lv_color_t color;         // 飞机颜色
-        int trail_length = 0;      // 尾迹长度（预留）
-    };
-    std::vector<ScreensaverShip> screensaver_ships_; // 飞机对象数组
-
     DisplayFonts fonts_;          // 字体集合
     ThemeColors current_theme_;   // 当前主题颜色
 
@@ -122,13 +94,6 @@ public:
 
     // Add theme switching function
     virtual void SetTheme(const std::string& theme_name) override;  // 切换主题
-
-    // 启动/停止星空屏保
-    virtual void StartScreensaver() override;  // 启动屏保
-    virtual void StopScreensaver() override;   // 停止屏保
-
-private:
-    void UpdateScreensaver();  // 更新屏保动画
 };
 
 // RGB LCD显示器

@@ -63,12 +63,6 @@ public:
      */
     CarUI* GetCarUI();
 
-    /**
-     * @brief 启用/禁用屏保（仅在聊天屏幕有效）
-     * @param enable true=允许屏保, false=禁止屏保
-     */
-    void SetScreensaverEnabled(bool enable);
-
 private:
     ScreenManager();
     ~ScreenManager();
@@ -80,5 +74,4 @@ private:
     CarUI* car_ui_;                     ///< 车载 UI 实例
     Display* display_;                  ///< LCD 显示器
     ScreenType current_screen_;         ///< 当前屏幕
-    bool screensaver_enabled_;          ///< 屏保启用标志
 };

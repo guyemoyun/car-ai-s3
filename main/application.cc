@@ -917,16 +917,6 @@ void Application::MainEventLoop() {
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
 
-            // 空闲状态下一段时间后启动星空屏保，其他状态则关闭屏保
-            if (device_state_ == kDeviceStateIdle) {
-                // 例如空闲满15秒后启动屏保
-                if (clock_ticks_ == 15) {
-                    display->StartScreensaver();
-                }
-            } else {
-                display->StopScreensaver();
-            }
-
             // 每10秒打印调试信息
             if (clock_ticks_ % 10 == 0) {
                 // SystemInfo::PrintTaskCpuUsage(pdMS_TO_TICKS(1000));  // 打印任务CPU使用率
@@ -1042,7 +1032,7 @@ void Application::SetListeningMode(ListeningMode mode) {
  * @details 核心状态机管理函数，处理状态切换时的各种操作。
  * 
  * 状态切换处理：
- * 1. 重置时钟计数器（用于屏保计时）
+ * 1. 重置时钟计数器
  * 2. 记录状态变化日志
  * 3. 发送状态变化事件通知
  * 4. 更新LED状态
@@ -1063,7 +1053,7 @@ void Application::SetDeviceState(DeviceState state) {
         return;
     }
     
-    clock_ticks_ = 0;  // 重置时钟计数器，用于屏保计时
+    clock_ticks_ = 0;  // 重置时钟计数器
     auto previous_state = device_state_;
     device_state_ = state;
     ESP_LOGI(TAG, "STATE: %s", STATE_STRINGS[device_state_]);

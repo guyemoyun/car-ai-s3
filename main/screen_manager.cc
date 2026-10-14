@@ -17,8 +17,7 @@ ScreenManager::ScreenManager()
       car_monitor_screen_(nullptr),
       car_ui_(nullptr),
       display_(nullptr),
-      current_screen_(SCREEN_CHAT),
-      screensaver_enabled_(true)
+      current_screen_(SCREEN_CHAT)
 {
 }
 
@@ -99,18 +98,11 @@ void ScreenManager::SwitchToScreen(ScreenType screen, bool anim)
     switch (screen) {
         case SCREEN_CHAT:
             target_screen = chat_screen_;
-            // 回到聊天屏幕时，允许屏保（已禁用屏保功能）
-            // screensaver_enabled_ = true;
             ESP_LOGI(TAG, "Switching to CHAT screen");
             break;
 
         case SCREEN_CAR_MONITOR:
             target_screen = car_monitor_screen_;
-            // 车载监测屏幕时，禁用屏保（已禁用屏保功能）
-            // if (display_ != nullptr) {
-            //     display_->StopScreensaver();
-            // }
-            // screensaver_enabled_ = false;
             ESP_LOGI(TAG, "Switching to CAR_MONITOR screen");
             break;
 
@@ -149,14 +141,3 @@ CarUI* ScreenManager::GetCarUI()
     return car_ui_;
 }
 
-void ScreenManager::SetScreensaverEnabled(bool enable)
-{
-    screensaver_enabled_ = enable;
-
-    if (display_ != nullptr && !enable) {
-        display_->StopScreensaver();
-        ESP_LOGI(TAG, "Screensaver disabled");
-    } else {
-        ESP_LOGI(TAG, "Screensaver enabled");
-    }
-}

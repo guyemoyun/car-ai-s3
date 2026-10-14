@@ -237,20 +237,6 @@ public:
     virtual void SetPowerSaveMode(bool on);
 
     /**
-     * @brief 启动屏保（如星空动画）
-     * @details
-     * 默认实现为空，具体显示类可根据需要重写此方法实现自定义屏保效果。
-     */
-    virtual void StartScreensaver() {}
-
-    /**
-     * @brief 停止屏保
-     * @details
-     * 默认实现为空，具体显示类可根据需要重写此方法来关闭屏保并恢复正常界面。
-     */
-    virtual void StopScreensaver() {}
-
-    /**
      * @brief 获取屏幕宽度
      * @return 屏幕宽度（像素）
      */

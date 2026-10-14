@@ -1,7 +1,7 @@
 /**
  * @file app_ui_manager.h
  * @brief 应用程序 UI 管理器
- * @details 统一管理所有 UI 页面（聊天、车载监测、设置）和屏保
+ * @details 统一管理所有 UI 页面（聊天、车载监测、设置）
  */
 
 #pragma once
@@ -14,7 +14,7 @@
 /**
  * @class AppUIManager
  * @brief 应用 UI 管理器
- * @details 单例模式，统一管理页面切换、屏保控制、按钮反馈
+ * @details 单例模式，统一管理页面切换、按钮反馈
  */
 class AppUIManager {
 public:
@@ -34,9 +34,8 @@ public:
     /**
      * @brief 切换到指定页面
      * @param page 目标页面
-     * @param disable_screensaver 是否禁用屏保（true=切换到该页面时停止屏保）
      */
-    void SwitchToPage(PageType page, bool disable_screensaver = true);
+    void SwitchToPage(PageType page);
 
     /**
      * @brief 获取当前页面
@@ -50,12 +49,6 @@ public:
      * @return LVGL 对象指针
      */
     lv_obj_t* GetPageContainer(PageType page);
-
-    /**
-     * @brief 启用/禁用屏保
-     * @param enable true=允许屏保, false=禁止屏保
-     */
-    void SetScreensaverEnabled(bool enable);
 
     /**
      * @brief 获取车载 UI 实例
@@ -85,7 +78,6 @@ private:
     CarUI* car_ui_;                     ///< 车载监测界面
     Display* display_;                  ///< LCD 显示器
     lv_obj_t* toast_label_;             ///< Toast 提示标签
-    bool screensaver_enabled_;          ///< 屏保启用标志
 
     /**
      * @brief Toast 消失定时器回调

@@ -17,8 +17,7 @@ AppUIManager::AppUIManager()
     : page_manager_(nullptr),
       car_ui_(nullptr),
       display_(nullptr),
-      toast_label_(nullptr),
-      screensaver_enabled_(true)
+      toast_label_(nullptr)
 {
 }
 
@@ -83,8 +82,8 @@ bool AppUIManager::Initialize(Display* display)
 
     lvgl_port_unlock();
 
-    // 5. 默认显示聊天页面（不禁用屏保）
-    instance_->SwitchToPage(PAGE_CHAT, false);
+    // 5. 默认显示聊天页面
+    instance_->SwitchToPage(PAGE_CHAT);
 
     ESP_LOGI(TAG, "AppUIManager initialized successfully");
     return true;
@@ -95,7 +94,7 @@ AppUIManager* AppUIManager::GetInstance()
     return instance_;
 }
 
-void AppUIManager::SwitchToPage(PageType page, bool disable_screensaver)
+void AppUIManager::SwitchToPage(PageType page)
 {
     if (page_manager_ == nullptr) {
         ESP_LOGE(TAG, "PageManager not initialized");
@@ -105,18 +104,6 @@ void AppUIManager::SwitchToPage(PageType page, bool disable_screensaver)
     if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
         // 切换页面
         page_manager_->SwitchToPage(page, true); // true = 使用动画
-
-        // 控制屏保
-        if (disable_screensaver && display_ != nullptr) {
-            // 停止屏保（如果正在运行）
-            display_->StopScreensaver();
-            screensaver_enabled_ = false;
-            ESP_LOGI(TAG, "Screensaver disabled for page %d", page);
-        } else if (page == PAGE_CHAT && display_ != nullptr) {
-            // 回到聊天页面时，重新允许屏保
-            screensaver_enabled_ = true;
-            ESP_LOGI(TAG, "Screensaver re-enabled for chat page");
-        }
 
         lvgl_port_unlock();
 
@@ -140,20 +127,6 @@ lv_obj_t* AppUIManager::GetPageContainer(PageType page)
         return nullptr;
     }
     return page_manager_->GetPageContainer(page);
-}
-
-void AppUIManager::SetScreensaverEnabled(bool enable)
-{
-    screensaver_enabled_ = enable;
-
-    if (display_ != nullptr) {
-        if (enable) {
-            ESP_LOGI(TAG, "Screensaver enabled");
-        } else {
-            display_->StopScreensaver();
-            ESP_LOGI(TAG, "Screensaver disabled and stopped");
-        }
-    }
 }
 
 CarUI* AppUIManager::GetCarUI()

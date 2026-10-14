@@ -4,25 +4,15 @@
  * 
  * @details
  * 本文件实现了LcdDisplay类及其派生类（SpiLcdDisplay、RgbLcdDisplay、MipiLcdDisplay等），
- * 提供了完整的LCD显示功能，包括UI界面渲染、主题切换、聊天消息显示、屏保动画等。
+ * 提供了完整的LCD显示功能，包括UI界面渲染、主题切换、聊天消息显示等。
  * 
  * 核心功能模块：
  * - 显示器初始化（支持SPI、RGB、MIPI等多种接口）
  * - UI界面搭建（状态栏、聊天区域、侧边栏等）
  * - 主题管理（深色/浅色主题切换）
  * - 聊天消息显示（用户/助手/系统消息）
- * - 星空屏保（60颗星星 + 10架彩色飞机）
  * - 状态栏更新（时间、电池、网络、静音等）
  * - 低电量提示
- * 
- * 屏保特性：
- * - 星星：60颗，尺寸3x3像素，向下漂移，闪烁效果
- * - 飞机：10架，尺寸20x10像素，10种不同颜色
- * - 飞机颜色：红色、青色、黄色、浅绿色、粉色、紫色、浅橙色、深青色、热粉色、酸橙绿
- * - 飞机运动：水平向右飞行，速度1-4像素/帧，垂直速度-1到1像素/帧
- * - 飞机分布：初始位置均匀分布在5行x2列的网格中
- * - 动态效果：随机速度变化（模拟气流），边界反弹，透明度闪烁
- * - 更新频率：80ms（12.5 FPS）
  * 
  * 使用方法：
  * 1. 创建显示器实例（根据硬件选择SpiLcdDisplay/RgbLcdDisplay/MipiLcdDisplay）
@@ -30,7 +20,6 @@
  * 3. 调用SetEmotion()设置表情图标
  * 4. 调用SetStatus()设置状态栏文本
  * 5. 调用SetTheme()切换主题
- * 6. 调用StartScreensaver()/StopScreensaver()控制屏保
  * 
  * 性能优化：
  * - 使用PSRAM缓存图像（如果可用）
@@ -336,19 +325,7 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
 }
 
 LcdDisplay::~LcdDisplay() {
-    // 清理屏保相关资源
-    if (screensaver_timer_ != nullptr) {
-        lv_timer_del(screensaver_timer_);
-        screensaver_timer_ = nullptr;
-    }
-    if (screensaver_layer_ != nullptr) {
-        lv_obj_del(screensaver_layer_);
-        screensaver_layer_ = nullptr;
-        screensaver_stars_.clear();
-        screensaver_ships_.clear();
-    }
-
-    // 然后再清理 LVGL 对象
+    // 清理 LVGL 对象
     if (content_ != nullptr) {
         lv_obj_del(content_);
     }
@@ -1210,224 +1187,3 @@ void LcdDisplay::SetTheme(const std::string& theme_name) {
     Display::SetTheme(theme_name);
 }
 
-void LcdDisplay::StartScreensaver() {
-    DisplayLockGuard lock(this);
-
-    // 如果屏保已经在运行，直接返回
-    if (screensaver_running_) {
-        return;
-    }
-    screensaver_running_ = true;
-
-    // 获取屏幕分辨率
-    lv_coord_t hres = lv_display_get_horizontal_resolution(display_);
-    lv_coord_t vres = lv_display_get_vertical_resolution(display_);
-
-    // 创建或显示屏保图层
-    if (screensaver_layer_ == nullptr) {
-        lv_obj_t* screen = lv_screen_active();
-        screensaver_layer_ = lv_obj_create(screen);
-        lv_obj_set_size(screensaver_layer_, hres, vres);
-        lv_obj_set_style_bg_color(screensaver_layer_, lv_color_black(), 0);
-        lv_obj_set_style_border_width(screensaver_layer_, 0, 0);
-        lv_obj_set_style_pad_all(screensaver_layer_, 0, 0);
-        lv_obj_clear_flag(screensaver_layer_, LV_OBJ_FLAG_SCROLLABLE);
-
-        // 创建星空背景（60颗星星）
-        const int star_count = 60;
-        screensaver_stars_.reserve(star_count);
-        for (int i = 0; i < star_count; ++i) {
-            lv_obj_t* star = lv_obj_create(screensaver_layer_);
-            // 星星尺寸：3x3像素（比原来的2x2更大，更醒目）
-            lv_obj_set_size(star, 3, 3);
-            lv_obj_set_style_radius(star, 1, 0);
-            lv_obj_set_style_bg_color(star, lv_color_white(), 0);
-            lv_obj_set_style_border_width(star, 0, 0);
-            lv_obj_clear_flag(star, LV_OBJ_FLAG_SCROLLABLE);
-
-            // 随机位置
-            int x = std::rand() % hres;
-            int y = std::rand() % vres;
-            lv_obj_set_pos(star, x, y);
-            // 随机透明度（200-255），实现闪烁效果
-            lv_obj_set_style_bg_opa(star, 200 + (std::rand() % 55), 0);
-
-            screensaver_stars_.push_back(star);
-        }
-
-        // 创建多架彩色飞机（10架）
-        const int plane_count = 10;
-        screensaver_ships_.reserve(plane_count);
-        for (int i = 0; i < plane_count; ++i) {
-            ScreensaverShip ship;
-            ship.obj = lv_obj_create(screensaver_layer_);
-            
-            // 飞机尺寸：20x10像素
-            lv_obj_set_size(ship.obj, 20, 10);
-            lv_obj_set_style_radius(ship.obj, 2, 0);
-            lv_obj_set_style_border_width(ship.obj, 0, 0);
-            lv_obj_clear_flag(ship.obj, LV_OBJ_FLAG_SCROLLABLE);
-
-            // 为每架飞机分配不同的颜色（10种鲜艳颜色）
-            lv_color_t plane_colors[] = {
-                lv_color_hex(0xFF6B6B), // 红色
-                lv_color_hex(0x4ECDC4), // 青色
-                lv_color_hex(0xFFE66D), // 黄色
-                lv_color_hex(0x95E1D3), // 浅绿色
-                lv_color_hex(0xF38181), // 粉色
-                lv_color_hex(0x6C5CE7), // 紫色
-                lv_color_hex(0xFFA07A), // 浅橙色
-                lv_color_hex(0x00CED1), // 深青色
-                lv_color_hex(0xFF69B4), // 热粉色
-                lv_color_hex(0x32CD32)  // 酸橙绿
-            };
-            ship.color = plane_colors[i % 10];
-            lv_obj_set_style_bg_color(ship.obj, ship.color, 0);
-
-            // 均匀分布初始位置，覆盖整个屏幕
-            // 将屏幕分成10个区域（5行x2列），每架飞机从不同区域出现
-            int rows = 5;  // 5行
-            int cols = 2;  // 2列
-            int row = i / cols;
-            int col = i % cols;
-            
-            int cell_width = hres / cols;
-            int cell_height = vres / rows;
-            
-            // 在每个区域内随机分布
-            ship.x = col * cell_width + (std::rand() % (cell_width - 30));
-            ship.y = row * cell_height + (std::rand() % (cell_height - 10));
-
-            // 随机速度（水平速度1-3，垂直速度-1到1）
-            ship.dx = 1 + (std::rand() % 3);
-            ship.dy = (std::rand() % 3) - 1; // -1, 0, 1
-
-            // 尾迹长度（预留，未来可扩展）
-            ship.trail_length = 5 + (std::rand() % 10);
-
-            lv_obj_set_pos(ship.obj, ship.x, ship.y);
-            screensaver_ships_.push_back(ship);
-        }
-    } else {
-        // 如果屏保图层已存在，只需显示它
-        lv_obj_clear_flag(screensaver_layer_, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    // 隐藏原有内容容器
-    if (container_ != nullptr) {
-        lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    // 创建或恢复屏保定时器（80ms更新一次，约12.5 FPS）
-    if (screensaver_timer_ == nullptr) {
-        screensaver_timer_ = lv_timer_create(
-            [](lv_timer_t* timer) {
-                auto self = static_cast<LcdDisplay*>(lv_timer_get_user_data(timer));
-                if (self != nullptr) {
-                    self->UpdateScreensaver();
-                }
-            },
-            80,
-            this);
-    } else {
-        lv_timer_resume(screensaver_timer_);
-    }
-}
-
-void LcdDisplay::StopScreensaver() {
-    DisplayLockGuard lock(this);
-
-    // 停止屏保运行标志
-    screensaver_running_ = false;
-
-    // 暂停屏保定时器
-    if (screensaver_timer_ != nullptr) {
-        lv_timer_pause(screensaver_timer_);
-    }
-
-    // 隐藏屏保图层
-    if (screensaver_layer_ != nullptr) {
-        lv_obj_add_flag(screensaver_layer_, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    // 恢复显示原有内容容器
-    if (container_ != nullptr) {
-        lv_obj_clear_flag(container_, LV_OBJ_FLAG_HIDDEN);
-    }
-}
-
-void LcdDisplay::UpdateScreensaver() {
-    DisplayLockGuard lock(this);
-
-    // 如果屏保未运行或图层不存在，直接返回
-    if (!screensaver_running_ || screensaver_layer_ == nullptr) {
-        return;
-    }
-
-    // 获取屏幕分辨率
-    lv_coord_t hres = lv_display_get_horizontal_resolution(display_);
-    lv_coord_t vres = lv_display_get_vertical_resolution(display_);
-
-    // 更新所有星星的位置和状态
-    for (auto* star : screensaver_stars_) {
-        if (star == nullptr) {
-            continue;
-        }
-
-        lv_coord_t x = lv_obj_get_x(star);
-        lv_coord_t y = lv_obj_get_y(star);
-
-        // 星星向下漂移，速度1-2像素/帧
-        y += 1 + (std::rand() % 2);
-        // 超出屏幕底部则从顶部随机位置重新出现
-        if (y >= vres) {
-            y = 0;
-            x = std::rand() % hres;
-        }
-        lv_obj_set_pos(star, x, y);
-
-        // 简单闪烁效果：随机透明度（120-239）
-        lv_opa_t opa = 120 + (std::rand() % 120);
-        lv_obj_set_style_bg_opa(star, opa, 0);
-    }
-
-    // 更新所有飞机的位置和状态
-    for (auto& ship : screensaver_ships_) {
-        if (ship.obj == nullptr) {
-            continue;
-        }
-
-        // 更新位置
-        ship.x += ship.dx;
-        ship.y += ship.dy;
-
-        // 随机速度变化（模拟气流影响，约5%的概率触发）
-        if (std::rand() % 20 == 0) {
-            ship.dx += (std::rand() % 3) - 1; // -1, 0, 1
-            if (ship.dx < 1) ship.dx = 1;
-            if (ship.dx > 4) ship.dx = 4;
-            
-            ship.dy += (std::rand() % 3) - 1;
-            if (ship.dy < -1) ship.dy = -1;
-            if (ship.dy > 1) ship.dy = 1;
-        }
-
-        // 边界检测：超出屏幕右侧则从左侧重新出现，Y坐标在整个屏幕范围内随机
-        if (ship.x >= hres) {
-            ship.x = -30;
-            ship.y = std::rand() % vres;
-        }
-
-        // 边界检测：超出上下边界则反弹
-        if (ship.y <= 0 || ship.y >= vres - 10) {
-            ship.dy = -ship.dy;
-        }
-
-        // 更新飞机位置
-        lv_obj_set_pos(ship.obj, ship.x, ship.y);
-
-        // 动态改变透明度（模拟闪烁效果，180-254）
-        lv_opa_t opa = 180 + (std::rand() % 75);
-        lv_obj_set_style_bg_opa(ship.obj, opa, 0);
-    }
-}
