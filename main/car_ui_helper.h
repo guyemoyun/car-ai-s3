@@ -35,11 +35,11 @@ public:
 
     /**
      * @brief 启动摄像头页实时预览任务
-     * @param interval_ms 取帧间隔（毫秒，默认 200 = 5 FPS）
+     * @param interval_ms 取帧间隔（毫秒，默认 100 = 10 FPS）
      * @return true=成功, false=失败
      * @note 仅在当前处于摄像头页时取帧刷新，离开该页自动停刷
      */
-    static bool StartCameraPreviewTask(uint32_t interval_ms = 200);
+    static bool StartCameraPreviewTask(uint32_t interval_ms = 100);
 
     /**
      * @brief 停止摄像头页实时预览任务

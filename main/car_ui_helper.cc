@@ -14,6 +14,7 @@
 #include <esp_log.h>
 #include <esp_lvgl_port.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <cstring>
@@ -227,18 +228,30 @@ void CarUIHelper::CameraPreviewTaskFunction(void* arg)
 
     ESP_LOGI(TAG, "Camera preview task running");
 
+    // 性能打点：每满 1 秒汇总一次帧率与各阶段耗时（只在摄像头页打印）
+    int64_t stat_window_start_us = esp_timer_get_time();
+    uint32_t stat_frames = 0;      // 窗口内成功刷新帧数
+    int64_t stat_get_us = 0;       // 累计：取帧+bswap 耗时
+    int64_t stat_lock_us = 0;      // 累计：LVGL 上锁+提交 耗时
+    int64_t stat_max_frame_us = 0; // 单帧最大总耗时
+
     while (true) {
         ScreenManager* scr_mgr = ScreenManager::GetInstance();
+        const bool on_cam_page = (scr_mgr != nullptr &&
+                                  scr_mgr->GetCurrentScreen() == SCREEN_CAR_CAMERA);
+
         // 只在摄像头页取帧：其它页面不刷，省 CPU 与 SPI 带宽
-        if (scr_mgr != nullptr && scr_mgr->GetCurrentScreen() == SCREEN_CAR_CAMERA &&
-            s_cam_preview_buf != nullptr) {
+        if (on_cam_page && s_cam_preview_buf != nullptr) {
             CarCameraUI* camera_ui = scr_mgr->GetCarCameraUI();
             Camera* camera = Board::GetInstance().GetCamera();
             if (camera_ui != nullptr && camera != nullptr) {
+                int64_t t0 = esp_timer_get_time();
                 int w = 0;
                 int h = 0;
-                if (camera->GetPreviewFrame(s_cam_preview_buf, CAM_PREVIEW_BYTES, &w, &h) &&
-                    w > 0 && h > 0 && (size_t)w * h * 2 <= CAM_PREVIEW_BYTES) {
+                bool got = camera->GetPreviewFrame(s_cam_preview_buf, CAM_PREVIEW_BYTES, &w, &h);
+                int64_t t1 = esp_timer_get_time();
+
+                if (got && w > 0 && h > 0 && (size_t)w * h * 2 <= CAM_PREVIEW_BYTES) {
                     if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
                         s_cam_preview_dsc.header.w = w;
                         s_cam_preview_dsc.header.h = h;
@@ -247,8 +260,44 @@ void CarUIHelper::CameraPreviewTaskFunction(void* arg)
                         camera_ui->SetFrame(&s_cam_preview_dsc);
                         lvgl_port_unlock();
                     }
+                    int64_t t2 = esp_timer_get_time();
+                    int64_t frame_us = t2 - t0;
+                    stat_get_us += (t1 - t0);
+                    stat_lock_us += (t2 - t1);
+                    if (frame_us > stat_max_frame_us) {
+                        stat_max_frame_us = frame_us;
+                    }
+                    stat_frames++;
                 }
             }
+        }
+
+        // 每满 1 秒汇报一次（避免用 %f：nano 格式化下不可靠，用整数算 fps*10）
+        int64_t now = esp_timer_get_time();
+        if (on_cam_page && now - stat_window_start_us >= 1000000) {
+            int64_t window_us = now - stat_window_start_us;
+            if (stat_frames > 0) {
+                uint32_t fps_x10 = (uint32_t)((int64_t)stat_frames * 10000000 / window_us);
+                ESP_LOGI(TAG, "Preview stats: fps=%u.%u get=%dus lock+draw=%dus max_frame=%dus",
+                         fps_x10 / 10, fps_x10 % 10,
+                         (int)(stat_get_us / stat_frames),
+                         (int)(stat_lock_us / stat_frames),
+                         (int)stat_max_frame_us);
+            } else {
+                ESP_LOGW(TAG, "Preview stats: fps=0.0 (摄像头页未取到帧)");
+            }
+            stat_window_start_us = now;
+            stat_frames = 0;
+            stat_get_us = 0;
+            stat_lock_us = 0;
+            stat_max_frame_us = 0;
+        } else if (!on_cam_page) {
+            // 离开摄像头页：重置统计窗口，避免把别页的时间算进来
+            stat_window_start_us = now;
+            stat_frames = 0;
+            stat_get_us = 0;
+            stat_lock_us = 0;
+            stat_max_frame_us = 0;
         }
 
         vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(interval_ms));
