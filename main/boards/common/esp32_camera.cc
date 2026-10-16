@@ -89,6 +89,9 @@ bool Esp32Camera::Capture() {
         encoder_thread_.join();
     }
 
+    // 与预览任务互斥：两者共用同一个 fb（fb_count=1），不能同时取帧
+    std::lock_guard<std::mutex> lock(fb_mutex_);
+
     auto start_time = esp_timer_get_time();
     int frames_to_get = 2;
     // Try to get a stable frame
@@ -129,6 +132,59 @@ bool Esp32Camera::Capture() {
     }
     return true;
 }
+
+/**
+ * @brief 取一帧用于本地预览（RGB565，字节序转为 LVGL 小端）
+ *
+ * 与 Capture() 的关键区别：
+ *  - 不把帧存进 fb_（那是 Capture 留给 Explain() 用的），借/抓完即还；
+ *  - 若 fb_ 已被 Capture 保留，此时驱动没有空闲缓冲、直接 fb_get 会永久阻塞，
+ *    因此这里**借用该帧只读**，既拿到画面又不会卡死预览任务；
+ *  - 摄像头 RGB565 是大端，LVGL 要小端，必须逐 16 位 bswap，否则整屏偏色。
+ */
+bool Esp32Camera::GetPreviewFrame(uint8_t* dst, size_t dst_size, int* out_w, int* out_h) {
+    if (dst == nullptr || dst_size == 0) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(fb_mutex_);
+
+    bool grabbed_for_preview = false;
+    if (fb_ == nullptr) {
+        // 当前没有保留帧，为预览临时抓一帧，用完立刻归还
+        fb_ = esp_camera_fb_get();
+        if (fb_ == nullptr) {
+            ESP_LOGW(TAG, "Preview: failed to get frame");
+            return false;
+        }
+        grabbed_for_preview = true;
+    }
+
+    bool ok = false;
+    size_t pixels = (size_t)fb_->width * fb_->height;
+    if (fb_->format != PIXFORMAT_RGB565) {
+        ESP_LOGW(TAG, "Preview: unexpected pixel format %d (expect RGB565)", fb_->format);
+    } else if (pixels * 2 > dst_size) {
+        ESP_LOGW(TAG, "Preview: frame %dx%d needs %u bytes > dst %u",
+                 fb_->width, fb_->height, (unsigned)(pixels * 2), (unsigned)dst_size);
+    } else {
+        const uint16_t* src = (const uint16_t*)fb_->buf;
+        uint16_t* out = (uint16_t*)dst;
+        for (size_t i = 0; i < pixels; i++) {
+            out[i] = __builtin_bswap16(src[i]);   // 大端 -> 小端
+        }
+        if (out_w) *out_w = fb_->width;
+        if (out_h) *out_h = fb_->height;
+        ok = true;
+    }
+
+    if (grabbed_for_preview) {
+        esp_camera_fb_return(fb_);
+        fb_ = nullptr;
+    }
+    return ok;
+}
+
 bool Esp32Camera::SetHMirror(bool enabled) {
     sensor_t *s = esp_camera_sensor_get();
     if (s == nullptr) {

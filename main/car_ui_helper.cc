@@ -9,15 +9,30 @@
 #include "car_monitor.h"
 #include "car_monitor_helper.h"
 #include "screen_manager.h"
+#include "board.h"       // Board::GetInstance()
+#include "camera.h"      // Camera::GetPreviewFrame()
 #include <esp_log.h>
 #include <esp_lvgl_port.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <cstring>
 
 #define TAG "CarUIHelper"
 
+// 摄像头页预览帧缓冲：640x480 RGB565 = 614,400 字节，**必须放 PSRAM**
+// （内部 RAM 稳态仅 ~32KB，放不下；PSRAM 有 8MB，充裕）
+#define CAM_PREVIEW_W     640
+#define CAM_PREVIEW_H     480
+#define CAM_PREVIEW_BYTES (CAM_PREVIEW_W * CAM_PREVIEW_H * 2)
+
 // 静态成员初始化
 TaskHandle_t CarUIHelper::update_task_ = nullptr;
+TaskHandle_t CarUIHelper::camera_preview_task_ = nullptr;
+
+// 预览帧缓冲与图像描述符（文件作用域，生命周期覆盖整个运行期）
+static uint8_t* s_cam_preview_buf = nullptr;
+static lv_img_dsc_t s_cam_preview_dsc;
 
 bool CarUIHelper::Initialize()
 {
@@ -151,6 +166,91 @@ void CarUIHelper::UpdateTaskFunction(void* arg)
         UpdateUI();
 
         // 等待下一个周期
+        vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(interval_ms));
+    }
+}
+
+bool CarUIHelper::StartCameraPreviewTask(uint32_t interval_ms)
+{
+    if (camera_preview_task_ != nullptr) {
+        ESP_LOGW(TAG, "Camera preview task already running");
+        return true;
+    }
+
+    // 分配预览缓冲（PSRAM）并初始化图像描述符（只在首次分配）
+    if (s_cam_preview_buf == nullptr) {
+        s_cam_preview_buf = (uint8_t*)heap_caps_malloc(CAM_PREVIEW_BYTES, MALLOC_CAP_SPIRAM);
+        if (s_cam_preview_buf == nullptr) {
+            ESP_LOGE(TAG, "Failed to allocate %d bytes preview buffer in PSRAM", CAM_PREVIEW_BYTES);
+            return false;
+        }
+        memset(&s_cam_preview_dsc, 0, sizeof(s_cam_preview_dsc));
+        s_cam_preview_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+        s_cam_preview_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
+        s_cam_preview_dsc.header.w = CAM_PREVIEW_W;
+        s_cam_preview_dsc.header.h = CAM_PREVIEW_H;
+        s_cam_preview_dsc.header.stride = CAM_PREVIEW_W * 2;
+        s_cam_preview_dsc.data_size = CAM_PREVIEW_BYTES;
+        s_cam_preview_dsc.data = s_cam_preview_buf;
+    }
+
+    BaseType_t ret = xTaskCreate(
+        CameraPreviewTaskFunction,
+        "cam_preview",
+        4096,
+        (void*)(uintptr_t)interval_ms,
+        4,
+        &camera_preview_task_
+    );
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create camera preview task");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Camera preview task started (interval: %lu ms)", interval_ms);
+    return true;
+}
+
+void CarUIHelper::StopCameraPreviewTask()
+{
+    if (camera_preview_task_ != nullptr) {
+        vTaskDelete(camera_preview_task_);
+        camera_preview_task_ = nullptr;
+        ESP_LOGI(TAG, "Camera preview task stopped");
+    }
+}
+
+void CarUIHelper::CameraPreviewTaskFunction(void* arg)
+{
+    uint32_t interval_ms = (uint32_t)(uintptr_t)arg;
+    TickType_t last_wake_time = xTaskGetTickCount();
+
+    ESP_LOGI(TAG, "Camera preview task running");
+
+    while (true) {
+        ScreenManager* scr_mgr = ScreenManager::GetInstance();
+        // 只在摄像头页取帧：其它页面不刷，省 CPU 与 SPI 带宽
+        if (scr_mgr != nullptr && scr_mgr->GetCurrentScreen() == SCREEN_CAR_CAMERA &&
+            s_cam_preview_buf != nullptr) {
+            CarCameraUI* camera_ui = scr_mgr->GetCarCameraUI();
+            Camera* camera = Board::GetInstance().GetCamera();
+            if (camera_ui != nullptr && camera != nullptr) {
+                int w = 0;
+                int h = 0;
+                if (camera->GetPreviewFrame(s_cam_preview_buf, CAM_PREVIEW_BYTES, &w, &h) &&
+                    w > 0 && h > 0 && (size_t)w * h * 2 <= CAM_PREVIEW_BYTES) {
+                    if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
+                        s_cam_preview_dsc.header.w = w;
+                        s_cam_preview_dsc.header.h = h;
+                        s_cam_preview_dsc.header.stride = w * 2;
+                        s_cam_preview_dsc.data_size = (size_t)w * h * 2;
+                        camera_ui->SetFrame(&s_cam_preview_dsc);
+                        lvgl_port_unlock();
+                    }
+                }
+            }
+        }
+
         vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(interval_ms));
     }
 }

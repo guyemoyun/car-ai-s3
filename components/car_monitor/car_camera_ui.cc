@@ -18,10 +18,15 @@ LV_FONT_DECLARE(font_puhui_20_4);
 // 因此取 300x225（仍是 4:3），合计 16+225+8+58 = 307 <= 320。
 #define PREVIEW_WIDTH   300
 #define PREVIEW_HEIGHT  225
+// 画幅内区（扣掉 2px 边框），实时画面正好填满不留边
+#define PREVIEW_INNER_WIDTH   (PREVIEW_WIDTH  - 4)
+#define PREVIEW_INNER_HEIGHT  (PREVIEW_HEIGHT - 4)
 
 CarCameraUI::CarCameraUI(lv_obj_t* parent)
     : container_(nullptr),
       preview_area_(nullptr),
+      preview_img_(nullptr),
+      preview_placeholder_(nullptr),
       btn_toggle_vehicle_(nullptr),
       btn_confirm_alert_(nullptr),
       btn_test_alert_(nullptr),
@@ -64,20 +69,28 @@ void CarCameraUI::CreateLayout()
     lv_obj_set_flex_flow(container_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(container_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // ---- 摄像头预览占位区（4:3 居中）----
+    // ---- 摄像头预览区（4:3 居中）----
     preview_area_ = lv_obj_create(container_);
     lv_obj_set_size(preview_area_, PREVIEW_WIDTH, PREVIEW_HEIGHT);
     lv_obj_set_style_bg_color(preview_area_, COLOR_PANEL, 0);
     lv_obj_set_style_border_color(preview_area_, COLOR_TEXT_DIM, 0);
     lv_obj_set_style_border_width(preview_area_, 2, 0);
     lv_obj_set_style_radius(preview_area_, 8, 0);
+    lv_obj_set_style_pad_all(preview_area_, 0, 0);  // 画面贴满内区
     lv_obj_clear_flag(preview_area_, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t* placeholder = lv_label_create(preview_area_);
-    lv_label_set_text(placeholder, "摄像头预览区域\n（待集成）");
-    lv_obj_set_style_text_color(placeholder, COLOR_TEXT_DIM, 0);
-    lv_obj_set_style_text_font(placeholder, &font_puhui_20_4, 0);
-    lv_obj_center(placeholder);
+    // 无帧时的占位文字（首帧到达后隐藏）
+    preview_placeholder_ = lv_label_create(preview_area_);
+    lv_label_set_text(preview_placeholder_, "摄像头预览区域\n（等待画面）");
+    lv_obj_set_style_text_color(preview_placeholder_, COLOR_TEXT_DIM, 0);
+    lv_obj_set_style_text_font(preview_placeholder_, &font_puhui_20_4, 0);
+    lv_obj_center(preview_placeholder_);
+
+    // 实时画面控件：初始隐藏，由取帧任务调用 SetFrame() 喂帧
+    preview_img_ = lv_image_create(preview_area_);
+    lv_obj_set_size(preview_img_, PREVIEW_INNER_WIDTH, PREVIEW_INNER_HEIGHT);
+    lv_obj_align(preview_img_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(preview_img_, LV_OBJ_FLAG_HIDDEN);
 
     // ---- 按钮行 ----
     CreateButtonArea(container_);
@@ -160,6 +173,25 @@ void CarCameraUI::SetVisible(bool visible)
             lv_obj_add_flag(container_, LV_OBJ_FLAG_HIDDEN);
         }
     }
+}
+
+void CarCameraUI::SetFrame(const lv_img_dsc_t* dsc)
+{
+    if (preview_img_ == nullptr || dsc == nullptr ||
+        dsc->header.w == 0 || dsc->header.h == 0 || dsc->data == nullptr) {
+        return;
+    }
+
+    lv_image_set_src(preview_img_, dsc);
+    // 源宽 -> 画幅内区宽：LVGL 的 scale 以 1/256 为单位（256 = 1.0）
+    lv_image_set_scale(preview_img_, (uint32_t)256 * PREVIEW_INNER_WIDTH / dsc->header.w);
+
+    // 首帧到达：隐藏占位文字、显示画面
+    if (preview_placeholder_ != nullptr) {
+        lv_obj_add_flag(preview_placeholder_, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_remove_flag(preview_img_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_invalidate(preview_img_);
 }
 
 void CarCameraUI::ButtonEventCallback(lv_event_t* e)

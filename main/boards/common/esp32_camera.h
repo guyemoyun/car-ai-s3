@@ -5,6 +5,7 @@
 #include <lvgl.h>
 #include <thread>
 #include <memory>
+#include <mutex>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -23,6 +24,7 @@ private:
     std::string explain_url_;
     std::string explain_token_;
     std::thread encoder_thread_;
+    std::mutex fb_mutex_;   // 串行化所有 fb 访问（预览任务与 Capture 不能同时取帧）
 
 public:
     Esp32Camera(const camera_config_t& config);
@@ -34,6 +36,7 @@ public:
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;
     virtual std::string Explain(const std::string& question);
+    virtual bool GetPreviewFrame(uint8_t* dst, size_t dst_size, int* out_w, int* out_h) override;
 };
 
 #endif // ESP32_CAMERA_H

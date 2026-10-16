@@ -34,6 +34,19 @@ public:
     static void StopUpdateTask();
 
     /**
+     * @brief 启动摄像头页实时预览任务
+     * @param interval_ms 取帧间隔（毫秒，默认 200 = 5 FPS）
+     * @return true=成功, false=失败
+     * @note 仅在当前处于摄像头页时取帧刷新，离开该页自动停刷
+     */
+    static bool StartCameraPreviewTask(uint32_t interval_ms = 200);
+
+    /**
+     * @brief 停止摄像头页实时预览任务
+     */
+    static void StopCameraPreviewTask();
+
+    /**
      * @brief 手动更新界面（从 CarMonitor 获取最新数据）
      */
     static void UpdateUI();
@@ -54,13 +67,20 @@ public:
     static void ToggleScreen();
 
 private:
-    static TaskHandle_t update_task_; ///< 更新任务句柄
+    static TaskHandle_t update_task_;         ///< 数据页更新任务句柄
+    static TaskHandle_t camera_preview_task_; ///< 摄像头预览任务句柄
 
     /**
      * @brief 界面更新任务函数
      * @param arg 任务参数（更新间隔）
      */
     static void UpdateTaskFunction(void* arg);
+
+    /**
+     * @brief 摄像头页取帧与刷新任务函数
+     * @param arg 任务参数（取帧间隔）
+     */
+    static void CameraPreviewTaskFunction(void* arg);
 
     /**
      * @brief 切换车辆状态按钮回调

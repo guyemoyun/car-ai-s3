@@ -628,6 +628,13 @@ void Application::Start() {
                     } else {
                         ESP_LOGE(TAG, "Failed to start CarUI update task");
                     }
+
+                    // 启动摄像头页实时预览任务（200ms = 5 FPS，仅摄像头页可见时取帧）
+                    if (CarUIHelper::StartCameraPreviewTask(200)) {
+                        ESP_LOGI(TAG, "Camera preview task started");
+                    } else {
+                        ESP_LOGE(TAG, "Failed to start camera preview task");
+                    }
                 } else {
                     ESP_LOGE(TAG, "Failed to initialize CarUIHelper");
                 }
