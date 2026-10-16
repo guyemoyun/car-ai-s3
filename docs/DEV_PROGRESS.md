@@ -5,7 +5,7 @@
 > 都在技能 **`esp32s3-dev`** 的 `references/board-hardware.md`（§2.3 / §8.4–8.8 / §16）、
 > `references/troubleshooting.md`（§5.6）、`references/s3-config.md`（§九）里。
 >
-> 工程：`car-ai-s3`　板：粤嵌 GEC-ESP32-S3 小智开发板　更新：2026-10
+> 工程：`car-ai-s3`　板：GRW ESP32-S3 小智开发板　更新：2026-10
 
 ---
 
@@ -122,7 +122,7 @@
 | 摄像头页 | `components/car_monitor/car_camera_ui.h` / `.cc`（4:3 占位 + 三颗按钮） |
 | 共用配色 | `components/car_monitor/car_ui_colors.h` |
 | **触摸驱动（本次改动）** | `components/esp_lcd_touch_ft6x36/esp_lcd_touch_ft6x36.c` |
-| 板级外设配置 | `main/boards/gec-esp32s3-board/gec_esp32s3_board.cc`（I²C / LCD / 触摸 / 摄像头 / 按键） |
+| 板级外设配置 | `main/boards/grw-esp32s3-board/grw_esp32s3_board.cc`（I²C / LCD / 触摸 / 摄像头 / 按键） |
 | 全局配置 | `sdkconfig`（生成物）+ `sdkconfig.defaults`（固化） |
 | 项目文档 | `docs/SCREEN_MANAGER_USAGE.md`、`docs/SW3_SCREEN_SWITCH_GUIDE.md`、`docs/CAR_UI_INTEGRATION.md` |
 | 板级事实 / 诊断 | 技能 `esp32s3-dev` → `references/board-hardware.md`、`troubleshooting.md`、`s3-config.md` |

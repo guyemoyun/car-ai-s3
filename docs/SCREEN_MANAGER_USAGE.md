@@ -49,8 +49,8 @@ main/
 ├── screen_manager.cc             # 屏幕管理器实现
 ├── car_ui_helper.h               # 已更新（使用 ScreenManager）
 ├── car_ui_helper.cc              # 已更新（使用 ScreenManager）
-└── boards/gec-esp32s3-board/
-    └── gec_esp32s3_board.cc      # 已更新（SW3 单击循环切换）
+└── boards/grw-esp32s3-board/
+    └── grw_esp32s3_board.cc      # 已更新（SW3 单击循环切换）
 
 components/car_monitor/
 ├── car_ui.h / car_ui.cc                # 车载数据页（CarUI）
@@ -188,7 +188,7 @@ I (xxx) CarUIHelper: CarUI update task started (interval: 500 ms)
 
 **原因**: SW3 按键（GPIO11）初始化失败或回调未注册
 
-**解决**: 检查 `gec_esp32s3_board.cc` 构造函数中的 SW3 初始化
+**解决**: 检查 `grw_esp32s3_board.cc` 构造函数中的 SW3 初始化
 ```cpp
 // SW3 单击切换屏幕
 Button* sw3_button = new Button(GPIO_NUM_11, true, 0, 0, false);

@@ -262,7 +262,7 @@ protected:
     lv_obj_t *notification_label_ = nullptr;  ///< 通知文本标签
     lv_obj_t *mute_label_ = nullptr;          ///< 静音状态标签
     lv_obj_t *battery_label_ = nullptr;       ///< 电池状态标签
-    lv_obj_t *brand_label_ = nullptr;         ///< 品牌标签（右上角显示"粤嵌"）
+    lv_obj_t *brand_label_ = nullptr;         ///< 品牌标签（左下角显示"GRW"）
     lv_obj_t* chat_message_label_ = nullptr;  ///< 聊天消息标签
     lv_obj_t* low_battery_popup_ = nullptr;   ///< 低电量弹窗
     lv_obj_t* low_battery_label_ = nullptr;   ///< 低电量提示文本

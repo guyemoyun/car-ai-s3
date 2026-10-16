@@ -1,8 +1,8 @@
 
 xiaozhi-esp32-1.9.4说明：
 【已完成】
-1.适配粤嵌ESP32-S3板子的源码，路径：xiaozhi-esp32-v2\main\boards\gec-esp32s3-board
-2.屏幕左下角默认显示“粤嵌”
+1.适配GRW ESP32-S3板子的源码，路径：xiaozhi-esp32-v2\main\boards\grw-esp32s3-board
+2.屏幕左下角默认显示“GRW”
 3.语音识别控制
 （1）LED灯的打开与关闭
 （2）屏幕亮度变化

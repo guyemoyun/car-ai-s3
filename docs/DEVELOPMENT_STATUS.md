@@ -264,7 +264,7 @@ LVGL更新 + 音频播报
 - `docs/development-plan.md` - 原始规划文档
 
 ### 示例代码
-- `main/boards/gec-esp32s3-board/gec_esp32s3_board.cc` - 硬件初始化
+- `main/boards/grw-esp32s3-board/grw_esp32s3_board.cc` - 硬件初始化
 - `main/boards/common/esp32_camera.h/cc` - 摄像头驱动参考
 - `main/boards/common/button.h/cc` - 按键处理参考
 

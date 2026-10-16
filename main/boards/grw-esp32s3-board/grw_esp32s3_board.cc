@@ -1,8 +1,8 @@
 /**
- * @file gec_esp32s3_board.cc
- * @brief 粤嵌ESP32-S3开发板硬件抽象层实现
+ * @file grw_esp32s3_board.cc
+ * @brief GRW ESP32-S3开发板硬件抽象层实现
  * @details
- * 该文件实现了基于ESP32-S3的粤嵌ESP32-S3开发板的硬件抽象层，包括I2C、SPI、显示屏、触摸屏、摄像头等外设的初始化和控制
+ * 该文件实现了基于ESP32-S3的GRW ESP32-S3开发板的硬件抽象层，包括I2C、SPI、显示屏、触摸屏、摄像头等外设的初始化和控制
  */
 
 #include "application.h"            // 应用程序接口
@@ -26,7 +26,7 @@
 #include <lvgl.h>                 // LVGL图形库
 #include <wifi_station.h>         // WiFi站模式
 
-#define TAG "gec-esp32s3-board" // 日志标签
+#define TAG "grw-esp32s3-board" // 日志标签
 
 // 全局函数：切换屏幕（由 SW3 按键调用）
 void ToggleCarMonitorScreen()
@@ -132,8 +132,8 @@ public:
 
 /**
  * @class GecEsp32s3Board
- * @brief 粤嵌ESP32-S3开发板主类
- * @details 继承自WifiBoard，实现粤嵌ESP32-S3开发板的所有硬件功能
+ * @brief GRW ESP32-S3开发板主类
+ * @details 继承自WifiBoard，实现GRW ESP32-S3开发板的所有硬件功能
  */
 class GecEsp32s3Board : public WifiBoard
 {

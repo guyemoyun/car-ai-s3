@@ -5,7 +5,7 @@
  * 本文件实现了MyInfo类，用于存储信息并通过语音命令触发播报。
  * 该模块支持MCP协议，可以通过语音指令播报指定信息或所有信息。
  * 
- * @author 粤嵌.温工
+ * @author GRW.温工
  * @date 2026-02-24
  * @version 1.0.0
  * 
@@ -94,7 +94,7 @@ MyInfo::~MyInfo() {
  * 1. 检查是否已经初始化，避免重复初始化
  * 2. 清空现有信息
  * 3. 加载信息1（温工程师信息）
- * 4. 加载信息2（粤嵌公司信息）
+ * 4. 加载信息2（GRW公司信息）
  * 5. 加载信息3（林院信息）
  * 6. 更新初始化状态
  * 
@@ -125,16 +125,16 @@ MyInfoError MyInfo::Initialize() {
     InfoEntry info1;
     info1.id = "info1";  // 信息唯一标识符
     info1.title = "介绍温工";  // 信息标题
-    info1.content = "温工程师 - 粤嵌科技技术专家，10年+嵌入式开发经验，ESP32物联网专家，专长：嵌入式系统、AI语音、工业物联网，代表项目：智能语音助手、工业物联网网关";  // 信息内容
+    info1.content = "温工程师 - GRW科技技术专家，10年+嵌入式开发经验，ESP32物联网专家，专长：嵌入式系统、AI语音、工业物联网，代表项目：智能语音助手、工业物联网网关";  // 信息内容
     info1.index = 1;  // 信息索引
     info_entries_.push_back(info1);  // 添加到信息列表
     ESP_LOGI(TAG, "加载信息1成功: %s", info1.title.c_str());
 
-    // 加载信息2：粤嵌公司信息
+    // 加载信息2：GRW公司信息
     InfoEntry info2;
     info2.id = "info2";  // 信息唯一标识符
-    info2.title = "介绍粤嵌公司";  // 信息标题
-    info2.content = "广州粤嵌通信科技股份有限公司，国家级高新技术企业，成立于2005年，核心业务：嵌入式培训、物联网研发、AI解决方案，官网：www.yueqian.com.cn";  // 信息内容
+    info2.title = "介绍GRW公司";  // 信息标题
+    info2.content = "广州GRW通信科技股份有限公司，国家级高新技术企业，成立于2005年，核心业务：嵌入式培训、物联网研发、AI解决方案，官网：www.grw.com.cn";  // 信息内容
     info2.index = 2;  // 信息索引
     info_entries_.push_back(info2);  // 添加到信息列表
     ESP_LOGI(TAG, "加载信息2成功: %s", info2.title.c_str());
@@ -218,7 +218,7 @@ VoiceCommand MyInfo::ParseVoiceCommand(const std::string& command) {
     if (cmd_lower == "介绍温工" || cmd_lower == "温工是谁" || cmd_lower == "info1") {
         ESP_LOGI(TAG, "识别到命令: 播报信息1");
         return VoiceCommand::PLAY_INFO_1;
-    } else if (cmd_lower == "介绍粤嵌公司" || cmd_lower == "粤嵌公司" || cmd_lower == "info2") {
+    } else if (cmd_lower == "介绍GRW公司" || cmd_lower == "GRW公司" || cmd_lower == "info2") {
         ESP_LOGI(TAG, "识别到命令: 播报信息2");
         return VoiceCommand::PLAY_INFO_2;
     } else if (cmd_lower == "介绍林院" || cmd_lower == "林院是谁" || cmd_lower == "info3") {
@@ -274,7 +274,7 @@ std::string MyInfo::GetErrorMessage(MyInfoError error) {
  * 解析语音命令并执行相应的播报操作
  * 支持的语音命令：
  * - "介绍温工"、"温工是谁"、"info1"：播报信息1
- * - "介绍粤嵌公司"、"粤嵌公司"、"info2"：播报信息2
+ * - "介绍GRW公司"、"GRW公司"、"info2"：播报信息2
  * - "介绍林院"、"林院是谁"、"info3"：播报信息3
  * - "所有信息"、"播报所有信息"、"allinfo"：播报所有信息
  * 

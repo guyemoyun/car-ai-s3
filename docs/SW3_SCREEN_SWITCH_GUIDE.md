@@ -33,7 +33,7 @@ SW3 按键 (GPIO11) - 用户功能 ⭐
 
 ### 修改的文件
 
-**main/boards/gec-esp32s3-board/gec_esp32s3_board.cc**
+**main/boards/grw-esp32s3-board/grw_esp32s3_board.cc**
 
 ```cpp
 // 第16行：添加头文件
@@ -105,7 +105,7 @@ I (xxx) car_monitor: CarMonitor initialized in DEMO mode
 1. **启动后** → 显示聊天界面（正常）
 2. **单击 SW3 按键** → 切换到车载数据页
    - 预期：淡入淡出过渡动画
-   - 预期日志：`I (xxx) gec-esp32s3-board: SW3 clicked - switching screen`
+   - 预期日志：`I (xxx) grw-esp32s3-board: SW3 clicked - switching screen`
    - 预期：屏幕显示车辆状态、环境数据、人员检测、告警（整页不滚动）
 3. **再次单击 SW3** → 切换到车载摄像头页
    - 预期：显示 4:3 预览占位区 + 三颗按钮
@@ -199,7 +199,7 @@ CarUIHelper::StartUpdateTask(500);
 
 | 功能 | 文件 | 行号 |
 |------|------|------|
-| SW3 初始化 | gec_esp32s3_board.cc | 471-477 |
+| SW3 初始化 | grw_esp32s3_board.cc | 471-477 |
 | ScreenManager 初始化 | application.cc | 599-605 |
 | CarUIHelper 初始化 | application.cc | 621-633 |
 | 屏幕切换逻辑 | car_ui_helper.cc | ToggleScreen() → SwitchToNextScreen() |

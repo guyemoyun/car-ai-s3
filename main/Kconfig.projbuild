@@ -64,8 +64,8 @@ choice BOARD_TYPE
     default BOARD_TYPE_BREAD_COMPACT_WIFI
     help
         Board type. 开发板类型
-    config BOARD_TYPE_GEC_ESP32S3_BOARD
-        bool "粤嵌ESP32-S3开发板"
+    config BOARD_TYPE_GRW_ESP32S3_BOARD
+        bool "GRW ESP32-S3开发板"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_WIFI
         bool "面包板新版接线（WiFi）"

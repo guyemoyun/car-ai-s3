@@ -69,7 +69,7 @@ lv_obj_set_style_text_font(label, &font_puhui_20_4, 0);
 
 ### **修复 2：提高触摸屏 I²C 速率**
 
-**文件**：`main/boards/gec-esp32s3-board/gec_esp32s3_board.cc`
+**文件**：`main/boards/grw-esp32s3-board/grw_esp32s3_board.cc`
 
 **改动**：
 ```cpp
@@ -247,7 +247,7 @@ tp_io_config.scl_speed_hz = 500000;
 |------|------|------|
 | `car_ui.cc` | 为所有标签添加 `font_puhui_20_4` | +20 |
 | `car_ui.cc` | 为按钮添加圆角和字体 | +6 |
-| `gec_esp32s3_board.cc` | 提升 I²C 时钟频率到 600kHz | +2 |
+| `grw_esp32s3_board.cc` | 提升 I²C 时钟频率到 600kHz | +2 |
 
 **总改动**：约 28 行代码
 
