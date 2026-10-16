@@ -1,0 +1,15 @@
+idf_component_register(
+    SRCS
+        "car_snapshot.cc"
+        "virtual_sensors.cc"
+        "car_monitor.cc"
+        "car_ui.cc"
+        "car_camera_ui.cc"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        "freertos"
+        "log"
+        "lvgl"
+        "esp_lvgl_port"
+)
