@@ -1,6 +1,8 @@
 /**
  * @file car_ui_helper.cc
  * @brief 车载监测界面辅助函数实现（基于 ScreenManager 架构）
+ * @details 数据页(CarUI)只显示数据；三颗按钮在摄像头页(CarCameraUI)，
+ *          回调统一在本类里接到 CarMonitorHelper。
  */
 
 #include "car_ui_helper.h"
@@ -26,16 +28,21 @@ bool CarUIHelper::Initialize()
         return false;
     }
 
-    CarUI* ui = scr_mgr->GetCarUI();
-    if (ui == nullptr) {
-        ESP_LOGE(TAG, "CarUI not available from ScreenManager");
+    if (scr_mgr->GetCarDataUI() == nullptr) {
+        ESP_LOGE(TAG, "CarUI (data page) not available from ScreenManager");
         return false;
     }
 
-    // 设置按钮回调
-    ui->SetToggleVehicleCallback(OnToggleVehicle);
-    ui->SetConfirmAlertCallback(OnConfirmAlert);
-    ui->SetTestAlertCallback(OnTestAlert);
+    CarCameraUI* camera_ui = scr_mgr->GetCarCameraUI();
+    if (camera_ui == nullptr) {
+        ESP_LOGE(TAG, "CarCameraUI not available from ScreenManager");
+        return false;
+    }
+
+    // 三颗按钮都在摄像头页，回调挂到该页
+    camera_ui->SetToggleVehicleCallback(OnToggleVehicle);
+    camera_ui->SetConfirmAlertCallback(OnConfirmAlert);
+    camera_ui->SetTestAlertCallback(OnTestAlert);
 
     ESP_LOGI(TAG, "CarUIHelper initialized successfully");
     return true;
@@ -83,7 +90,7 @@ void CarUIHelper::UpdateUI()
         return;
     }
 
-    CarUI* ui = scr_mgr->GetCarUI();
+    CarUI* ui = scr_mgr->GetCarDataUI();
     if (ui == nullptr) {
         return;
     }
@@ -108,8 +115,8 @@ void CarUIHelper::SwitchToCarMonitorScreen()
 {
     ScreenManager* scr_mgr = ScreenManager::GetInstance();
     if (scr_mgr != nullptr) {
-        scr_mgr->SwitchToScreen(SCREEN_CAR_MONITOR, true);
-        ESP_LOGI(TAG, "Switched to car monitor screen");
+        scr_mgr->SwitchToScreen(SCREEN_CAR_DATA, true);
+        ESP_LOGI(TAG, "Switched to car data screen");
     }
 }
 
@@ -131,15 +138,6 @@ void CarUIHelper::ToggleScreen()
     }
 }
 
-CarUI* CarUIHelper::GetInstance()
-{
-    ScreenManager* scr_mgr = ScreenManager::GetInstance();
-    if (scr_mgr == nullptr) {
-        return nullptr;
-    }
-    return scr_mgr->GetCarUI();
-}
-
 void CarUIHelper::UpdateTaskFunction(void* arg)
 {
     uint32_t interval_ms = (uint32_t)(uintptr_t)arg;
@@ -148,11 +146,9 @@ void CarUIHelper::UpdateTaskFunction(void* arg)
     ESP_LOGI(TAG, "CarUI update task running");
 
     while (true) {
-        // 只在车载监测屏幕时更新 UI（节省 CPU）
-        ScreenManager* scr_mgr = ScreenManager::GetInstance();
-        if (scr_mgr != nullptr && scr_mgr->GetCurrentScreen() == SCREEN_CAR_MONITOR) {
-            UpdateUI();
-        }
+        // 无条件刷新数据页：数据页不可见时更新只是标记脏区（LVGL 不渲染非活动屏幕），
+        // 开销可忽略；好处是切到数据页时数值已是最新，不会先看到 500ms 前的旧值。
+        UpdateUI();
 
         // 等待下一个周期
         vTaskDelayUntil(&last_wake_time, pdMS_TO_TICKS(interval_ms));

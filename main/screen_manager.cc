@@ -14,8 +14,10 @@ ScreenManager* ScreenManager::instance_ = nullptr;
 
 ScreenManager::ScreenManager()
     : chat_screen_(nullptr),
-      car_monitor_screen_(nullptr),
-      car_ui_(nullptr),
+      car_data_screen_(nullptr),
+      car_camera_screen_(nullptr),
+      car_data_ui_(nullptr),
+      car_camera_ui_(nullptr),
       display_(nullptr),
       current_screen_(SCREEN_CHAT)
 {
@@ -23,14 +25,24 @@ ScreenManager::ScreenManager()
 
 ScreenManager::~ScreenManager()
 {
-    if (car_ui_) {
-        delete car_ui_;
-        car_ui_ = nullptr;
+    if (car_data_ui_) {
+        delete car_data_ui_;
+        car_data_ui_ = nullptr;
     }
 
-    if (car_monitor_screen_) {
-        lv_obj_del(car_monitor_screen_);
-        car_monitor_screen_ = nullptr;
+    if (car_camera_ui_) {
+        delete car_camera_ui_;
+        car_camera_ui_ = nullptr;
+    }
+
+    if (car_data_screen_) {
+        lv_obj_del(car_data_screen_);
+        car_data_screen_ = nullptr;
+    }
+
+    if (car_camera_screen_) {
+        lv_obj_del(car_camera_screen_);
+        car_camera_screen_ = nullptr;
     }
 }
 
@@ -56,14 +68,20 @@ bool ScreenManager::Initialize(Display* display)
     instance_->chat_screen_ = lv_scr_act();
     ESP_LOGI(TAG, "Chat screen saved: %p", instance_->chat_screen_);
 
-    // 2. 创建车载监测屏幕（独立屏幕对象）
-    instance_->car_monitor_screen_ = lv_obj_create(NULL);  // NULL = 独立屏幕
-    lv_obj_set_style_bg_color(instance_->car_monitor_screen_, lv_color_hex(0x000000), 0);
-    ESP_LOGI(TAG, "Car monitor screen created: %p", instance_->car_monitor_screen_);
+    // 2. 创建车载数据页屏幕（独立屏幕对象）
+    instance_->car_data_screen_ = lv_obj_create(NULL);  // NULL = 独立屏幕
+    lv_obj_set_style_bg_color(instance_->car_data_screen_, lv_color_hex(0x000000), 0);
+    ESP_LOGI(TAG, "Car data screen created: %p", instance_->car_data_screen_);
 
-    // 3. 在车载监测屏幕中创建 CarUI
-    instance_->car_ui_ = new CarUI(instance_->car_monitor_screen_);
-    ESP_LOGI(TAG, "CarUI created in car monitor screen");
+    // 3. 创建车载摄像头页屏幕（独立屏幕对象）
+    instance_->car_camera_screen_ = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(instance_->car_camera_screen_, lv_color_hex(0x000000), 0);
+    ESP_LOGI(TAG, "Car camera screen created: %p", instance_->car_camera_screen_);
+
+    // 4. 在两个屏幕中分别创建各自的界面
+    instance_->car_data_ui_ = new CarUI(instance_->car_data_screen_);
+    instance_->car_camera_ui_ = new CarCameraUI(instance_->car_camera_screen_);
+    ESP_LOGI(TAG, "CarUI (data) + CarCameraUI created");
 
     lvgl_port_unlock();
 
@@ -101,9 +119,14 @@ void ScreenManager::SwitchToScreen(ScreenType screen, bool anim)
             ESP_LOGI(TAG, "Switching to CHAT screen");
             break;
 
-        case SCREEN_CAR_MONITOR:
-            target_screen = car_monitor_screen_;
-            ESP_LOGI(TAG, "Switching to CAR_MONITOR screen");
+        case SCREEN_CAR_DATA:
+            target_screen = car_data_screen_;
+            ESP_LOGI(TAG, "Switching to CAR_DATA screen");
+            break;
+
+        case SCREEN_CAR_CAMERA:
+            target_screen = car_camera_screen_;
+            ESP_LOGI(TAG, "Switching to CAR_CAMERA screen");
             break;
 
         default:
@@ -136,8 +159,12 @@ ScreenType ScreenManager::GetCurrentScreen()
     return current_screen_;
 }
 
-CarUI* ScreenManager::GetCarUI()
+CarUI* ScreenManager::GetCarDataUI()
 {
-    return car_ui_;
+    return car_data_ui_;
 }
 
+CarCameraUI* ScreenManager::GetCarCameraUI()
+{
+    return car_camera_ui_;
+}

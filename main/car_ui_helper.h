@@ -53,12 +53,6 @@ public:
      */
     static void ToggleScreen();
 
-    /**
-     * @brief 获取 CarUI 实例
-     * @return CarUI 指针（可能为 nullptr）
-     */
-    static CarUI* GetInstance();
-
 private:
     static TaskHandle_t update_task_; ///< 更新任务句柄
 

@@ -17,7 +17,7 @@ BOOT 按键 (GPIO0) - 系统功能
 └── （不涉及屏幕切换）
 
 SW3 按键 (GPIO11) - 用户功能 ⭐
-└── 单击 → 切换屏幕（聊天 ↔ 车载监测）
+└── 单击 → 循环切换屏幕（聊天 → 数据页 → 摄像头页 → 聊天）
 ```
 
 ### 优势
@@ -39,15 +39,16 @@ SW3 按键 (GPIO11) - 用户功能 ⭐
 // 第16行：添加头文件
 #include "car_ui_helper.h"  // 车载界面辅助类
 
-// 第453-459行：在构造函数中添加 SW3 初始化
+// 第471-477行：在构造函数中添加 SW3 初始化
 // 初始化 SW3 用户按键（GPIO11）用于切换屏幕
 Button* sw3_button = new Button(GPIO_NUM_11, true, 0, 0, false);
 sw3_button->OnClick([](){
   ESP_LOGI(TAG, "SW3 clicked - switching screen");
-  extern void ToggleCarMonitorScreen();
-  ToggleCarMonitorScreen();
+  CarUIHelper::ToggleScreen();
 });
 ```
+
+> 说明：SW3 单击 → `CarUIHelper::ToggleScreen()` → `ScreenManager::SwitchToNextScreen()`，按枚举顺序循环三页。
 
 ### 按键参数说明
 
@@ -91,8 +92,9 @@ Ctrl+Shift+P → ESP-IDF: Monitor Device
 ```
 I (xxx) Application: Initializing ScreenManager...
 I (xxx) ScreenManager: Chat screen saved: 0x3fcxxxxx
-I (xxx) ScreenManager: Car monitor screen created: 0x3fcxxxxx
-I (xxx) CarUI: CarUI initialized
+I (xxx) ScreenManager: Car data screen created: 0x3fcxxxxx
+I (xxx) ScreenManager: Car camera screen created: 0x3fcxxxxx
+I (xxx) ScreenManager: CarUI (data) + CarCameraUI created
 I (xxx) ScreenManager: ScreenManager initialized successfully
 I (xxx) Application: Initializing CarMonitor (demo mode)...
 I (xxx) car_monitor: CarMonitor initialized in DEMO mode
@@ -101,12 +103,14 @@ I (xxx) car_monitor: CarMonitor initialized in DEMO mode
 ### Step 4: 功能测试
 
 1. **启动后** → 显示聊天界面（正常）
-2. **单击 SW3 按键** → 切换到车载监测屏幕
+2. **单击 SW3 按键** → 切换到车载数据页
    - 预期：淡入淡出过渡动画
    - 预期日志：`I (xxx) gec-esp32s3-board: SW3 clicked - switching screen`
-   - 预期：屏幕显示车载监测数据
-3. **再次单击 SW3** → 回到聊天屏幕
-4. **验证数据更新** → 车载数据每 500ms 更新一次
+   - 预期：屏幕显示车辆状态、环境数据、人员检测、告警（整页不滚动）
+3. **再次单击 SW3** → 切换到车载摄像头页
+   - 预期：显示 4:3 预览占位区 + 三颗按钮
+4. **再次单击 SW3** → 回到聊天屏幕
+5. **验证数据更新** → 数据页每 500ms 更新一次
 
 ---
 
@@ -121,22 +125,34 @@ I (xxx) car_monitor: CarMonitor initialized in DEMO mode
 └─────────────────────────────┘
 ```
 
-### 车载监测屏幕（单击 SW3）
+### 车载数据页（单击 SW3 一次）
 ```
-┌─────────────────────────────┐
-│  摄像头预览区域              │
-│  （灰色占位）                │
-├─────────────────────────────┤
-│  🚗 车辆: 行驶中 [绿色]      │
-│  📊 环境数据                 │
-│    🌡️ 温度: 25.3°C          │
-│    💧 湿度: 51.2%            │
-│    ☀️ 光照: 48.7%           │
-│  👤 人员检测                 │
-│    检测人数: 0               │
-│    置信度: 0%                │
-│  ⚠️ 告警: 无                │
-└─────────────────────────────┘
+┌───────────────────────────────────────────────┐
+│ 🚗 车辆: 行驶中 [绿色]            （顶部通栏 52）│
+├───────────────────────┬───────────────────────┤
+│ 📊 环境数据            │ 👤 人员检测            │
+│   🌡️ 温度: 25.3°C      │   检测人数: 0          │
+│   💧 湿度: 51.2%       │   置信度: 0%           │
+│   ☀️ 光照: 48.7%       │                        │
+├───────────────────────┴───────────────────────┤
+│ ⚠️ 告警: 无                       （底部通栏 48）│
+└───────────────────────────────────────────────┘
+（整页不滚动）
+```
+
+### 车载摄像头页（再单击 SW3）
+```
+┌───────────────────────────────────────────────┐
+│        ┌───────────────────────────┐          │
+│        │   摄像头预览区域           │          │
+│        │   （300×225 灰色占位，     │          │
+│        │    待集成，无实时画面）    │          │
+│        └───────────────────────────┘          │
+├───────────────────────────────────────────────┤
+│ [ 切换状态 ]   [ 确认告警 ]   [ 测试告警 ]     │
+│            三颗按钮 140×50 横排                │
+└───────────────────────────────────────────────┘
+（整页不滚动）
 ```
 
 ---
@@ -168,9 +184,9 @@ I (xxx) ScreenManager: ScreenManager initialized successfully
 
 如果没有这条日志，说明初始化失败。
 
-### 问题 3: 车载数据不更新
+### 问题 3: 数据页数据不更新
 
-**原因**：CarUIHelper 更新任务没有启动
+**原因**：CarUIHelper 更新任务没有启动，或 `GetCarDataUI()` 返回空
 
 **解决**：确认 application.cc 中已调用：
 ```cpp
@@ -183,10 +199,10 @@ CarUIHelper::StartUpdateTask(500);
 
 | 功能 | 文件 | 行号 |
 |------|------|------|
-| SW3 初始化 | gec_esp32s3_board.cc | 453-459 |
+| SW3 初始化 | gec_esp32s3_board.cc | 471-477 |
 | ScreenManager 初始化 | application.cc | 599-605 |
-| CarUIHelper 初始化 | application.cc | 614-633 |
-| 屏幕切换逻辑 | car_ui_helper.cc | ToggleScreen() |
+| CarUIHelper 初始化 | application.cc | 621-633 |
+| 屏幕切换逻辑 | car_ui_helper.cc | ToggleScreen() → SwitchToNextScreen() |
 
 ---
 
@@ -199,7 +215,7 @@ Button* sw3_button = new Button(GPIO_NUM_11, true, 2000, 0, false);
 
 // 单击：切换屏幕
 sw3_button->OnClick([](){
-  ToggleCarMonitorScreen();
+  CarUIHelper::ToggleScreen();
 });
 
 // 长按：打开设置菜单
@@ -235,9 +251,9 @@ custom_button->OnClick([](){
 - [x] BOOT 按键保持原样（不修改）
 - [x] SW3 按键初始化（GPIO11）
 - [x] SW3 单击回调连接
-- [x] ScreenManager 初始化
+- [x] ScreenManager 初始化（三个独立屏幕）
 - [x] CarUIHelper 初始化
-- [x] 构建配置更新
+- [x] 构建配置更新（car_ui.cc + car_camera_ui.cc）
 - [x] 文档完成
 - [ ] 编译验证（待执行）
 - [ ] 烧录测试（待执行）
@@ -249,13 +265,14 @@ custom_button->OnClick([](){
 
 **最简单、最安全的方案**：
 - ✅ BOOT 按键：完全不改，原功能保留
-- ✅ SW3 按键：单击切换屏幕，功能单一
+- ✅ SW3 按键：单击按枚举顺序循环三页，功能单一
 - ✅ 两个系统独立运行，不互相影响
 
 **用户操作**：
 1. 正常使用聊天功能（按 BOOT 控制）
-2. 需要看车载数据？按一下 SW3
-3. 想回聊天？再按一下 SW3
+2. 需要看车载数据？按一下 SW3（数据页）
+3. 想再按一下 SW3 → 摄像头页（预览占位 + 三按钮）
+4. 再按一下，回到聊天
 
 简洁高效！
 

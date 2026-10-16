@@ -151,7 +151,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
 
     ESP_LOGI(TAG, "Initialize LVGL port");
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_priority = 1;
+    port_cfg.task_priority = 4;  // 提高渲染优先级：过低会被音频/WiFi任务抢占导致滑动掉帧
 #if CONFIG_SOC_CPU_CORES_NUM > 1
     port_cfg.task_affinity = 1;
 #endif
@@ -162,8 +162,8 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 20),
-        .double_buffer = false,
+        .buffer_size = static_cast<uint32_t>(width_ * 30),  // 30行：双缓冲共占 57.6KB 内部 DMA RAM（内存紧张，不宜再加）
+        .double_buffer = true,  // 双缓冲：渲染下一块与 SPI 传输当前块重叠，消除滑动顿挫
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),
         .vres = static_cast<uint32_t>(height_),

@@ -340,11 +340,11 @@ private:
    */
   void InitializeTouch()
   {
-    esp_lcd_touch_handle_t tp; // 触摸屏句柄
+    esp_lcd_touch_handle_t tp = nullptr; // 触摸屏句柄（必须初始化：失败路径不会写出该值）
     // 配置触摸屏参数
     esp_lcd_touch_config_t tp_cfg = {
-        .x_max = DISPLAY_HEIGHT,     // X轴最大值(与显示屏高度对应)
-        .y_max = DISPLAY_WIDTH,      // Y轴最大值(与显示屏宽度对应)
+        .x_max = DISPLAY_HEIGHT,     // X轴最大值(与显示屏高度对应，320；例程为 BSP_LCD_V_RES)
+        .y_max = DISPLAY_WIDTH,      // Y轴最大值(与显示屏宽度对应，480；例程为 BSP_LCD_H_RES)
         .rst_gpio_num = GPIO_NUM_NC, // 复位引脚与LCD共享
         .int_gpio_num = GPIO_NUM_NC, // 中断引脚未使用
         .levels =
@@ -354,12 +354,13 @@ private:
             },
         .flags =
             {
-                .swap_xy = 1,  // 交换XY坐标
-                .mirror_x = 1, // X轴镜像
-                .mirror_y = 0, // Y轴不镜像
+                .swap_xy = 1,  // 交换XY坐标（与例程一致）
+                .mirror_x = 0, // X轴不镜像（与例程一致）
+                .mirror_y = 1, // Y轴镜像（与例程一致）
             },
     };
     esp_lcd_panel_io_handle_t tp_io_handle = NULL; // 触摸屏IO句柄
+    esp_err_t tp_ret = ESP_OK;                      // 触摸初始化结果
 #ifdef TP_DRIVER_FT5X06
     // 配置I2C触摸屏IO参数
     esp_lcd_panel_io_i2c_config_t tp_io_config =
@@ -367,10 +368,11 @@ private:
     tp_io_config.scl_speed_hz = 400000; // 恢复到 400kHz（稳定可靠）
 
     // 创建I2C触摸屏IO接口
-    esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
-
-    // 创建FT5x06触摸屏驱动实例
-    esp_lcd_touch_new_i2c_ft5x06(tp_io_handle, &tp_cfg, &tp);
+    tp_ret = esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
+    if (tp_ret == ESP_OK) {
+        // 创建FT5x06触摸屏驱动实例
+        tp_ret = esp_lcd_touch_new_i2c_ft5x06(tp_io_handle, &tp_cfg, &tp);
+    }
 #elifdef TP_DRIVER_FT6X36
     // 配置I2C触摸屏IO参数
     esp_lcd_panel_io_i2c_config_t tp_io_config =
@@ -378,11 +380,21 @@ private:
     tp_io_config.scl_speed_hz = 400000; // 恢复到 400kHz（稳定可靠）
 
     // 创建I2C触摸屏IO接口
-    esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
-    // 创建FT6X36触摸屏驱动实例
-    esp_lcd_touch_new_i2c_ft6x36(tp_io_handle, &tp_cfg, &tp);
+    tp_ret = esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
+    if (tp_ret == ESP_OK) {
+        // 创建FT6X36触摸屏驱动实例
+        tp_ret = esp_lcd_touch_new_i2c_ft6x36(tp_io_handle, &tp_cfg, &tp);
+    }
 #endif
-    assert(tp); // 确保触摸屏初始化成功
+    // 触摸初始化失败时必须直接返回：此时 tp 仍为 nullptr，
+    // 继续往下走会把野指针交给 LVGL，触发 LoadProhibited 崩溃重启
+    if (tp_ret != ESP_OK || tp == nullptr) {
+        ESP_LOGE(TAG, "Touch init failed (0x%x), tp=%p - skip touch registration", tp_ret, tp);
+        if (tp_io_handle != NULL) {
+            esp_lcd_panel_io_del(tp_io_handle);
+        }
+        return;
+    }
 
     /* 添加触摸输入到LVGL(针对选定的屏幕) */
     const lvgl_port_touch_cfg_t touch_cfg = {

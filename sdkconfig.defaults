@@ -88,3 +88,8 @@ CONFIG_LV_USE_WIN=n
 
 CONFIG_LV_BUILD_EXAMPLES=n
 
+# 性能监视器（SYSMON + PERF_MONITOR）：已移除。FPS/CPU 测量已完成，且内部 RAM 紧张
+# （实测最低水位 9~17KB，随网络重试波动），监视器常驻只会白占 RAM 并干扰观感。
+# LV_DEF_REFR_PERIOD 维持默认 33。注：先前"改成 16 会导致屏闪"的归因是错的——
+# 那次屏闪的真凶是触摸初始化失败引发的崩溃重启循环，16ms 是否真的有害尚未验证。
+

@@ -632,11 +632,12 @@ void Application::Start() {
                     ESP_LOGE(TAG, "Failed to initialize CarUIHelper");
                 }
 
-                // 启动车载监测测试任务（用于验证功能）
-                extern bool start_car_monitor_test_task();
-                if (start_car_monitor_test_task()) {
-                    ESP_LOGI(TAG, "CarMonitor test task started");
-                }
+                // 车载监测测试任务只用于每 5 秒打印一次状态日志（界面已能显示同样数据），
+                // 为腾出内部 RAM（约 4KB 任务栈）暂时停用。需要恢复时取消下面注释即可。
+                // extern bool start_car_monitor_test_task();
+                // if (start_car_monitor_test_task()) {
+                //     ESP_LOGI(TAG, "CarMonitor test task started");
+                // }
             }
         }
     }
