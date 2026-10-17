@@ -55,9 +55,10 @@ public:
     void SetVisible(bool visible);
 
     /**
-     * @brief 刷新预览画面（由取帧任务在 LVGL 锁内调用）
-     * @param dsc RGB565 图像描述符（数据须为 LVGL 小端，缓冲须在 PSRAM）
-     * @note 首帧到达后自动隐藏"待集成"占位文字
+     * @brief 刷新预览画面（由预览任务在 LVGL 锁内调用）
+     * @param dsc RGB565 图像描述符（数据须为 LVGL 小端，缓冲在 PSRAM 即可——
+     *            LVGL 会先拷进内部 DMA 绘制缓冲再推屏，故无内部 RAM 压力）
+     * @note 源尺寸与画幅内区同为 320x240，按 1:1 blit，不做软件缩放
      */
     void SetFrame(const lv_img_dsc_t* dsc);
 
@@ -70,8 +71,8 @@ public:
 private:
     lv_obj_t* container_;           ///< 主容器
     lv_obj_t* preview_area_;        ///< 摄像头预览区（4:3 画幅）
-    lv_obj_t* preview_img_;         ///< 实时画面（lv_image），无帧时隐藏
-    lv_obj_t* preview_placeholder_; ///< "待集成"占位文字，首帧到达后隐藏
+    lv_obj_t* preview_img_;         ///< 实时画面（lv_image，320x240 1:1）
+    lv_obj_t* preview_placeholder_; ///< "等待画面"占位文字，首帧到达后隐藏
 
     // 交互按钮
     lv_obj_t* btn_toggle_vehicle_;  ///< 切换车辆状态按钮

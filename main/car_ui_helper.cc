@@ -9,8 +9,8 @@
 #include "car_monitor.h"
 #include "car_monitor_helper.h"
 #include "screen_manager.h"
-#include "board.h"       // Board::GetInstance()
-#include "camera.h"      // Camera::GetPreviewFrame()
+#include "board.h"               // Board::GetInstance()
+#include "camera.h"              // Camera::GetPreviewFrame()
 #include <esp_log.h>
 #include <esp_lvgl_port.h>
 #include <esp_heap_caps.h>
@@ -21,19 +21,22 @@
 
 #define TAG "CarUIHelper"
 
-// 摄像头页预览帧缓冲：640x480 RGB565 = 614,400 字节，**必须放 PSRAM**
-// （内部 RAM 稳态仅 ~32KB，放不下；PSRAM 有 8MB，充裕）
-#define CAM_PREVIEW_W     640
-#define CAM_PREVIEW_H     480
+// 预览帧缓冲：320x240 RGB565 = 153,600 字节（正好等于摄像头 QVGA 原始画幅，1:1 显示）。
+// 放 PSRAM 即可：LVGL 会先把它拷进自己的【内部 DMA】绘制缓冲再推屏，
+// 不存在"SPI 直接从 PSRAM 取数"的问题（SPI3 不支持外部内存 DMA，会要求等大内部中转）。
+// 双缓冲乒乓：LVGL 渲染时读一块，任务写另一块，避免读到半新半旧的画面。
+#define CAM_PREVIEW_W     320
+#define CAM_PREVIEW_H     240
 #define CAM_PREVIEW_BYTES (CAM_PREVIEW_W * CAM_PREVIEW_H * 2)
 
 // 静态成员初始化
 TaskHandle_t CarUIHelper::update_task_ = nullptr;
 TaskHandle_t CarUIHelper::camera_preview_task_ = nullptr;
 
-// 预览帧缓冲与图像描述符（文件作用域，生命周期覆盖整个运行期）
-static uint8_t* s_cam_preview_buf = nullptr;
-static lv_img_dsc_t s_cam_preview_dsc;
+// 双缓冲帧缓冲与图像描述符（文件作用域，生命周期覆盖整个运行期）
+static uint8_t* s_cam_preview_buf[2] = {nullptr, nullptr};
+static lv_img_dsc_t s_cam_preview_dsc[2];
+static int s_cam_preview_show = 0;  // 当前正在显示的缓冲索引
 
 bool CarUIHelper::Initialize()
 {
@@ -178,30 +181,44 @@ bool CarUIHelper::StartCameraPreviewTask(uint32_t interval_ms)
         return true;
     }
 
-    // 分配预览缓冲（PSRAM）并初始化图像描述符（只在首次分配）
-    if (s_cam_preview_buf == nullptr) {
-        s_cam_preview_buf = (uint8_t*)heap_caps_malloc(CAM_PREVIEW_BYTES, MALLOC_CAP_SPIRAM);
-        if (s_cam_preview_buf == nullptr) {
-            ESP_LOGE(TAG, "Failed to allocate %d bytes preview buffer in PSRAM", CAM_PREVIEW_BYTES);
-            return false;
+    // 分配双缓冲（PSRAM），只在首次分配
+    if (s_cam_preview_buf[0] == nullptr) {
+        for (int i = 0; i < 2; i++) {
+            s_cam_preview_buf[i] = (uint8_t*)heap_caps_malloc(CAM_PREVIEW_BYTES, MALLOC_CAP_SPIRAM);
+            if (s_cam_preview_buf[i] == nullptr) {
+                ESP_LOGE(TAG, "Failed to allocate preview buffer %d (%d bytes) in PSRAM",
+                         i, CAM_PREVIEW_BYTES);
+                for (int j = 0; j < i; j++) {
+                    heap_caps_free(s_cam_preview_buf[j]);
+                    s_cam_preview_buf[j] = nullptr;
+                }
+                return false;
+            }
+            memset(&s_cam_preview_dsc[i], 0, sizeof(s_cam_preview_dsc[i]));
+            s_cam_preview_dsc[i].header.magic = LV_IMAGE_HEADER_MAGIC;
+            s_cam_preview_dsc[i].header.cf = LV_COLOR_FORMAT_RGB565;
+            s_cam_preview_dsc[i].header.w = CAM_PREVIEW_W;
+            s_cam_preview_dsc[i].header.h = CAM_PREVIEW_H;
+            s_cam_preview_dsc[i].header.stride = CAM_PREVIEW_W * 2;
+            s_cam_preview_dsc[i].data_size = CAM_PREVIEW_BYTES;
+            s_cam_preview_dsc[i].data = s_cam_preview_buf[i];
         }
-        memset(&s_cam_preview_dsc, 0, sizeof(s_cam_preview_dsc));
-        s_cam_preview_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
-        s_cam_preview_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
-        s_cam_preview_dsc.header.w = CAM_PREVIEW_W;
-        s_cam_preview_dsc.header.h = CAM_PREVIEW_H;
-        s_cam_preview_dsc.header.stride = CAM_PREVIEW_W * 2;
-        s_cam_preview_dsc.data_size = CAM_PREVIEW_BYTES;
-        s_cam_preview_dsc.data = s_cam_preview_buf;
+        s_cam_preview_show = 0;
+        ESP_LOGI(TAG, "Preview double buffer allocated: 2 x %d bytes in PSRAM", CAM_PREVIEW_BYTES);
     }
 
-    BaseType_t ret = xTaskCreate(
+    // 钉核到 CPU 0、优先级 3：
+    // 音频输入与 LVGL 都在 CPU 1；若本任务被调度到 CPU 1，其逐帧 153,600 字节的拷贝
+    // 会与 wakenet9 推理抢核，饿死 CPU1 的 IDLE → 触发 task_wdt 并拖垮 AFE 喂数。
+    // 钉到 CPU 0 与摄像头采集同核即消除该竞争。
+    BaseType_t ret = xTaskCreatePinnedToCore(
         CameraPreviewTaskFunction,
         "cam_preview",
         4096,
         (void*)(uintptr_t)interval_ms,
-        4,
-        &camera_preview_task_
+        3,
+        &camera_preview_task_,
+        0   // CPU 0
     );
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create camera preview task");
@@ -241,29 +258,35 @@ void CarUIHelper::CameraPreviewTaskFunction(void* arg)
                                   scr_mgr->GetCurrentScreen() == SCREEN_CAR_CAMERA);
 
         // 只在摄像头页取帧：其它页面不刷，省 CPU 与 SPI 带宽
-        if (on_cam_page && s_cam_preview_buf != nullptr) {
+        if (on_cam_page && s_cam_preview_buf[0] != nullptr) {
             CarCameraUI* camera_ui = scr_mgr->GetCarCameraUI();
             Camera* camera = Board::GetInstance().GetCamera();
             if (camera_ui != nullptr && camera != nullptr) {
+                // 乒乓：写"非当前显示"的那块；LVGL 渲染时读的是另一块
+                const int next = 1 - s_cam_preview_show;
+
                 int64_t t0 = esp_timer_get_time();
                 int w = 0;
                 int h = 0;
-                bool got = camera->GetPreviewFrame(s_cam_preview_buf, CAM_PREVIEW_BYTES, &w, &h);
+                bool got = camera->GetPreviewFrame(s_cam_preview_buf[next], CAM_PREVIEW_BYTES, &w, &h);
                 int64_t t1 = esp_timer_get_time();
 
                 if (got && w > 0 && h > 0 && (size_t)w * h * 2 <= CAM_PREVIEW_BYTES) {
+                    s_cam_preview_dsc[next].header.w = w;
+                    s_cam_preview_dsc[next].header.h = h;
+                    s_cam_preview_dsc[next].header.stride = w * 2;
+                    s_cam_preview_dsc[next].data_size = (size_t)w * h * 2;
+
                     if (lvgl_port_lock(pdMS_TO_TICKS(100))) {
-                        s_cam_preview_dsc.header.w = w;
-                        s_cam_preview_dsc.header.h = h;
-                        s_cam_preview_dsc.header.stride = w * 2;
-                        s_cam_preview_dsc.data_size = (size_t)w * h * 2;
-                        camera_ui->SetFrame(&s_cam_preview_dsc);
+                        camera_ui->SetFrame(&s_cam_preview_dsc[next]);
                         lvgl_port_unlock();
                     }
+                    s_cam_preview_show = next;
+
                     int64_t t2 = esp_timer_get_time();
                     int64_t frame_us = t2 - t0;
-                    stat_get_us += (t1 - t0);
-                    stat_lock_us += (t2 - t1);
+                    stat_get_us += (t1 - t0);      // 取帧 + 字节序转换
+                    stat_lock_us += (t2 - t1);     // 提交给 LVGL（含等锁）
                     if (frame_us > stat_max_frame_us) {
                         stat_max_frame_us = frame_us;
                     }

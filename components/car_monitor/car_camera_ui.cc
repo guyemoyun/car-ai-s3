@@ -12,15 +12,17 @@
 // 字体声明（由 78/xiaozhi-fonts 组件提供），必须放在文件作用域
 LV_FONT_DECLARE(font_puhui_20_4);
 
-// 预览区尺寸：摄像头 GC0308 输出 640x480，是 4:3 画幅。
-// 按 4:3 定尺寸，将来接真实画面不用返工。
-// 不能取 320x240：容器内边距16 + 预览240 + 间距8 + 按钮区58 = 322 > 320，会溢出。
-// 因此取 300x225（仍是 4:3），合计 16+225+8+58 = 307 <= 320。
-#define PREVIEW_WIDTH   300
-#define PREVIEW_HEIGHT  225
-// 画幅内区（扣掉 2px 边框），实时画面正好填满不留边
-#define PREVIEW_INNER_WIDTH   (PREVIEW_WIDTH  - 4)
-#define PREVIEW_INNER_HEIGHT  (PREVIEW_HEIGHT - 4)
+// 预览内区取 320x240 —— 正好等于摄像头 QVGA 原始画幅（GC0308 配 FRAMESIZE_QVGA），
+// 源与内区同尺寸 => LVGL 按 1:1 blit，不做软件缩放（比原来 640->296 缩放更省、更清晰）。
+// 备注：曾试过照搬同板例程「绕过 LVGL、一次 draw_bitmap 直接推 PSRAM 帧」，但本应用 LCD
+// 挂在 SPI3 上，而 SPI3 不支持外部内存 DMA，从 PSRAM 推屏必须经等大的内部 RAM 中转
+// （153,600 字节），本应用内部 RAM 不足 → 稳定失败，故回退到 LVGL 路径。
+// 外框比内区各大 2px 边框 => 对象 324x244；纵向 4 + 244 + 4 + 58 + 4 = 314 <= 320。
+#define PREVIEW_BORDER  2
+#define PREVIEW_WIDTH   324
+#define PREVIEW_HEIGHT  244
+#define PREVIEW_INNER_WIDTH   (PREVIEW_WIDTH  - PREVIEW_BORDER * 2)   // 320
+#define PREVIEW_INNER_HEIGHT  (PREVIEW_HEIGHT - PREVIEW_BORDER * 2)   // 240
 
 CarCameraUI::CarCameraUI(lv_obj_t* parent)
     : container_(nullptr),
@@ -44,8 +46,8 @@ CarCameraUI::CarCameraUI(lv_obj_t* parent)
     lv_obj_set_size(container_, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(container_, COLOR_BACKGROUND, 0);
     lv_obj_set_style_border_width(container_, 0, 0);
-    lv_obj_set_style_pad_all(container_, 8, 0);
-    lv_obj_set_style_pad_row(container_, 8, 0);  // flex 纵向流：行间距
+    lv_obj_set_style_pad_all(container_, 4, 0);
+    lv_obj_set_style_pad_row(container_, 4, 0);  // flex 纵向流：行间距
     // 整页不滚动：本页只有"预览区 + 按钮行"两块固定内容
     lv_obj_clear_flag(container_, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -69,24 +71,25 @@ void CarCameraUI::CreateLayout()
     lv_obj_set_flex_flow(container_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(container_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // ---- 摄像头预览区（4:3 居中）----
+    // ---- 摄像头预览区（4:3，画面由预览任务直接推屏）----
     preview_area_ = lv_obj_create(container_);
     lv_obj_set_size(preview_area_, PREVIEW_WIDTH, PREVIEW_HEIGHT);
     lv_obj_set_style_bg_color(preview_area_, COLOR_PANEL, 0);
     lv_obj_set_style_border_color(preview_area_, COLOR_TEXT_DIM, 0);
-    lv_obj_set_style_border_width(preview_area_, 2, 0);
-    lv_obj_set_style_radius(preview_area_, 8, 0);
-    lv_obj_set_style_pad_all(preview_area_, 0, 0);  // 画面贴满内区
+    lv_obj_set_style_border_width(preview_area_, PREVIEW_BORDER, 0);
+    lv_obj_set_style_radius(preview_area_, 0, 0);   // 不圆角：画面与边框直角对齐
+    lv_obj_set_style_pad_all(preview_area_, 0, 0);  // 内区不留边，正好 320x240
     lv_obj_clear_flag(preview_area_, LV_OBJ_FLAG_SCROLLABLE);
 
-    // 无帧时的占位文字（首帧到达后隐藏）
+    // 无帧时的占位文字（SetFrame() 收到首帧后隐藏）
     preview_placeholder_ = lv_label_create(preview_area_);
     lv_label_set_text(preview_placeholder_, "摄像头预览区域\n（等待画面）");
     lv_obj_set_style_text_color(preview_placeholder_, COLOR_TEXT_DIM, 0);
     lv_obj_set_style_text_font(preview_placeholder_, &font_puhui_20_4, 0);
     lv_obj_center(preview_placeholder_);
 
-    // 实时画面控件：初始隐藏，由取帧任务调用 SetFrame() 喂帧
+    // 实时画面控件：初始隐藏，由预览任务 SetFrame() 喂帧。
+    // 源 320x240 与内区同尺寸 => 1:1 blit，不做软件缩放（省钱且清晰）。
     preview_img_ = lv_image_create(preview_area_);
     lv_obj_set_size(preview_img_, PREVIEW_INNER_WIDTH, PREVIEW_INNER_HEIGHT);
     lv_obj_align(preview_img_, LV_ALIGN_CENTER, 0, 0);
@@ -181,11 +184,8 @@ void CarCameraUI::SetFrame(const lv_img_dsc_t* dsc)
         dsc->header.w == 0 || dsc->header.h == 0 || dsc->data == nullptr) {
         return;
     }
-
+    // 源与画幅内区同为 320x240 -> 1:1，不做缩放（lv_image 默认 scale 即 256=1.0）
     lv_image_set_src(preview_img_, dsc);
-    // 源宽 -> 画幅内区宽：LVGL 的 scale 以 1/256 为单位（256 = 1.0）
-    lv_image_set_scale(preview_img_, (uint32_t)256 * PREVIEW_INNER_WIDTH / dsc->header.w);
-
     // 首帧到达：隐藏占位文字、显示画面
     if (preview_placeholder_ != nullptr) {
         lv_obj_add_flag(preview_placeholder_, LV_OBJ_FLAG_HIDDEN);

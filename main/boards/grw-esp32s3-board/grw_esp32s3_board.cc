@@ -438,9 +438,9 @@ private:
     config.pin_reset = CAMERA_PIN_RESET;       // 复位引脚
     config.xclk_freq_hz = XCLK_FREQ_HZ;        // XCLK时钟频率
     config.pixel_format = PIXFORMAT_RGB565;    // 像素格式RGB565
-    config.frame_size = FRAMESIZE_VGA;         // 帧尺寸VGA(640x480)
+    config.frame_size = FRAMESIZE_QVGA;        // 帧尺寸QVGA(320x240)：与官方例程一致，预览可零缩放直接推屏
     config.jpeg_quality = 12;                  // JPEG质量(0-63，越小质量越好)
-    config.fb_count = 1;                       // 帧缓冲区数量
+    config.fb_count = 2;                       // 双帧缓冲：异步 SPI 推屏期间另一块可用，且与 AI 识图并行
     config.fb_location = CAMERA_FB_IN_PSRAM;   // 帧缓冲区位置(PSRAM)
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY; // 抓取模式(缓冲区空时抓取)
 
