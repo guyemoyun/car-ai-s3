@@ -6,3 +6,5 @@ phy_init, data, phy,     0xf000,    0x1000,
 model,    data, spiffs,  0x10000,   0xF0000,
 ota_0,    app,  ota_0,   0x100000,  6M,
 ota_1,    app,  ota_1,   0x700000,  6M,
+# M4 人员检测模型分区（PICO_S8_V1，由 pedestrian_detect 组件在 flash 时自动写入）
+pedestrian_det, data, spiffs, 0xD00000, 1M,

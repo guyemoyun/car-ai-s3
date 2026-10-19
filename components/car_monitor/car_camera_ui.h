@@ -1,10 +1,11 @@
 /**
  * @file car_camera_ui.h
  * @brief 车载摄像头页 LVGL 界面
- * @details 4:3 预览占位区 + 三颗操作按钮，整页不滚动
+ * @details 4:3 预览区（320x240，1:1 显示），整页不滚动
  *
- * 三颗按钮（切换状态 / 确认告警 / 测试告警）按设计全部放在本页，
- * 数据页(CarUI)只显示数据，不再承载交互。
+ * 注：原设计在本页横排放三颗操作按钮（切换状态 / 确认告警 / 测试告警）。
+ * 因屏幕触摸尚不稳定，**按键控件已暂时移除**；三个 Set*Callback 接口与
+ * main 侧的接线保留，便于日后恢复。
  */
 
 #pragma once
@@ -15,7 +16,7 @@
 /**
  * @class CarCameraUI
  * @brief 车载摄像头页界面类
- * @details 预览区按摄像头真实画幅 4:3 定尺寸；容器禁用滚动
+ * @details 预览区按摄像头画幅 320x240(4:3) 定尺寸；容器禁用滚动；当前无按键控件
  */
 class CarCameraUI {
 public:
@@ -74,30 +75,13 @@ private:
     lv_obj_t* preview_img_;         ///< 实时画面（lv_image，320x240 1:1）
     lv_obj_t* preview_placeholder_; ///< "等待画面"占位文字，首帧到达后隐藏
 
-    // 交互按钮
-    lv_obj_t* btn_toggle_vehicle_;  ///< 切换车辆状态按钮
-    lv_obj_t* btn_confirm_alert_;   ///< 确认告警按钮
-    lv_obj_t* btn_test_alert_;      ///< 测试告警按钮
-
-    // 回调函数指针
+    // 回调函数指针（三颗屏幕按键已暂时移除；保留接线，便于将来恢复）
     void (*toggle_vehicle_callback_)(void);
     void (*confirm_alert_callback_)(void);
     void (*test_alert_callback_)(void);
 
     /**
-     * @brief 创建界面布局（预览区 + 按钮行）
+     * @brief 创建界面布局（当前只有预览区）
      */
     void CreateLayout();
-
-    /**
-     * @brief 创建按钮行（三颗按钮横排）
-     * @param parent 父对象
-     */
-    void CreateButtonArea(lv_obj_t* parent);
-
-    /**
-     * @brief LVGL 按钮事件回调
-     * @param e 事件对象
-     */
-    static void ButtonEventCallback(lv_event_t* e);
 };

@@ -143,42 +143,62 @@ bool Esp32Camera::Capture() {
  *  - 摄像头 RGB565 是大端，LVGL 要小端，必须逐 16 位 bswap，否则整屏偏色。
  */
 bool Esp32Camera::GetPreviewFrame(uint8_t* dst, size_t dst_size, int* out_w, int* out_h) {
+    return CopyFrameLocked(dst, dst_size, out_w, out_h, /*to_little_endian=*/true);
+}
+
+/**
+ * @brief 取一帧原始 RGB565（原样，不转字节序）供本地推理
+ *
+ * 与 GetPreviewFrame() 走完全相同的取帧纪律（同一把锁、fb_ 非空则只读借用、
+ * 自己抓的用完即还），唯一区别是**不做 bswap** —— esp-dl 的 ImagePreprocessor
+ * 直接接受 RGB565 大端，内部一趟完成 resize + 色彩转换 + 归一化量化。
+ */
+bool Esp32Camera::GetRawFrame(uint8_t* dst, size_t dst_size, int* out_w, int* out_h) {
+    return CopyFrameLocked(dst, dst_size, out_w, out_h, /*to_little_endian=*/false);
+}
+
+bool Esp32Camera::CopyFrameLocked(uint8_t* dst, size_t dst_size, int* out_w, int* out_h,
+                                  bool to_little_endian) {
     if (dst == nullptr || dst_size == 0) {
         return false;
     }
 
     std::lock_guard<std::mutex> lock(fb_mutex_);
 
-    bool grabbed_for_preview = false;
+    bool grabbed = false;
     if (fb_ == nullptr) {
-        // 当前没有保留帧，为预览临时抓一帧，用完立刻归还
+        // 当前没有保留帧，临时抓一帧，用完立刻归还
         fb_ = esp_camera_fb_get();
         if (fb_ == nullptr) {
-            ESP_LOGW(TAG, "Preview: failed to get frame");
+            ESP_LOGW(TAG, "GetFrame: failed to get frame");
             return false;
         }
-        grabbed_for_preview = true;
+        grabbed = true;
     }
 
     bool ok = false;
     size_t pixels = (size_t)fb_->width * fb_->height;
     if (fb_->format != PIXFORMAT_RGB565) {
-        ESP_LOGW(TAG, "Preview: unexpected pixel format %d (expect RGB565)", fb_->format);
+        ESP_LOGW(TAG, "GetFrame: unexpected pixel format %d (expect RGB565)", fb_->format);
     } else if (pixels * 2 > dst_size) {
-        ESP_LOGW(TAG, "Preview: frame %dx%d needs %u bytes > dst %u",
+        ESP_LOGW(TAG, "GetFrame: frame %dx%d needs %u bytes > dst %u",
                  fb_->width, fb_->height, (unsigned)(pixels * 2), (unsigned)dst_size);
     } else {
-        const uint16_t* src = (const uint16_t*)fb_->buf;
-        uint16_t* out = (uint16_t*)dst;
-        for (size_t i = 0; i < pixels; i++) {
-            out[i] = __builtin_bswap16(src[i]);   // 大端 -> 小端
+        if (to_little_endian) {
+            const uint16_t* src = (const uint16_t*)fb_->buf;
+            uint16_t* out = (uint16_t*)dst;
+            for (size_t i = 0; i < pixels; i++) {
+                out[i] = __builtin_bswap16(src[i]);   // 大端 -> 小端（供 LVGL）
+            }
+        } else {
+            memcpy(dst, fb_->buf, pixels * 2);        // 原样拷贝（供 esp-dl，RGB565BE）
         }
         if (out_w) *out_w = fb_->width;
         if (out_h) *out_h = fb_->height;
         ok = true;
     }
 
-    if (grabbed_for_preview) {
+    if (grabbed) {
         esp_camera_fb_return(fb_);
         fb_ = nullptr;
     }

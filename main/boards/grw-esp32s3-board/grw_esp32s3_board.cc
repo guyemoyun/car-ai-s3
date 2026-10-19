@@ -345,8 +345,10 @@ private:
     esp_lcd_touch_config_t tp_cfg = {
         .x_max = DISPLAY_HEIGHT,     // X轴最大值(与显示屏高度对应，320；例程为 BSP_LCD_V_RES)
         .y_max = DISPLAY_WIDTH,      // Y轴最大值(与显示屏宽度对应，480；例程为 BSP_LCD_H_RES)
-        .rst_gpio_num = GPIO_NUM_NC, // 复位引脚与LCD共享
-        .int_gpio_num = GPIO_NUM_NC, // 中断引脚未使用
+        .rst_gpio_num = GPIO_NUM_NC, // 复位引脚与LCD共用（原理图：CTP_RST→RESET）
+        .int_gpio_num = GPIO_NUM_10, // 触摸中断：原理图 U12 第13脚 CTP_INT→IO10。
+                                     // 启用后 esp_lvgl_port 自动切 LV_INDEV_MODE_EVENT（事件驱动），
+                                     // 触摸在"中断到达"时被读取，不再依赖 33ms 轮询 → 根治漏采
         .levels =
             {
                 .reset = 0,     // 复位电平

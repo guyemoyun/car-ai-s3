@@ -26,6 +26,14 @@ private:
     std::thread encoder_thread_;
     std::mutex fb_mutex_;   // 串行化所有 fb 访问（预览任务与 Capture 不能同时取帧）
 
+    /**
+     * @brief 持锁把当前帧拷进调用方缓冲（GetPreviewFrame / GetRawFrame 的共用实现）
+     * @param to_little_endian true=逐 16 位 bswap（供 LVGL）；false=原样（供 esp-dl）
+     * @note 内部自行加 fb_mutex_ 锁
+     */
+    bool CopyFrameLocked(uint8_t* dst, size_t dst_size, int* out_w, int* out_h,
+                         bool to_little_endian);
+
 public:
     Esp32Camera(const camera_config_t& config);
     ~Esp32Camera();
@@ -37,6 +45,7 @@ public:
     virtual bool SetVFlip(bool enabled) override;
     virtual std::string Explain(const std::string& question);
     virtual bool GetPreviewFrame(uint8_t* dst, size_t dst_size, int* out_w, int* out_h) override;
+    virtual bool GetRawFrame(uint8_t* dst, size_t dst_size, int* out_w, int* out_h) override;
 };
 
 #endif // ESP32_CAMERA_H

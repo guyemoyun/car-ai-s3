@@ -162,7 +162,11 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         .io_handle = panel_io_,
         .panel_handle = panel_,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 30),  // 30行：双缓冲共占 57.6KB 内部 DMA RAM（内存紧张，不宜再加）
+        // 15 行：双缓冲共占 28.8KB 内部 DMA RAM（原为 30 行 = 57.6KB）。
+        // 砍半原因：M4 接入 esp-dl 后内部 RAM 被压到全周期最低仅 23 字节，
+        // 触摸 I²C 读取会间歇失败，表现为"多次点击才响应一次"；砍半腾出约 29KB。
+        // 代价：每次 flush 行数减半 → 预览横向细缝数量约翻倍（已知并接受）。
+        .buffer_size = static_cast<uint32_t>(width_ * 15),
         .double_buffer = true,  // 双缓冲：渲染下一块与 SPI 传输当前块重叠，消除滑动顿挫
         .trans_size = 0,
         .hres = static_cast<uint32_t>(width_),

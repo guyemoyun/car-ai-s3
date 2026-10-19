@@ -58,7 +58,8 @@ bool CarUIHelper::Initialize()
         return false;
     }
 
-    // 三颗按钮都在摄像头页，回调挂到该页
+    // 三颗屏幕按键（切换状态/确认告警/测试告警）已暂时移除：触摸尚不稳定。
+    // 回调仍照旧挂上，日后恢复按键控件时无需改动这里。
     camera_ui->SetToggleVehicleCallback(OnToggleVehicle);
     camera_ui->SetConfirmAlertCallback(OnConfirmAlert);
     camera_ui->SetTestAlertCallback(OnTestAlert);

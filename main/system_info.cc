@@ -8,6 +8,7 @@
 #include <esp_partition.h>
 #include <esp_app_desc.h>
 #include <esp_ota_ops.h>
+#include <esp_heap_caps.h>
 #if CONFIG_IDF_TARGET_ESP32P4
 #include "esp_wifi_remote.h"
 #endif
@@ -147,5 +148,30 @@ void SystemInfo::PrintTaskList() {
 void SystemInfo::PrintHeapStats() {
     int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    ESP_LOGI(TAG, "free sram: %u minimal sram: %u", free_sram, min_free_sram);
+    ESP_LOGI(TAG, "free sram: %u minimal sram: %u | psram free: %u largest: %u",
+             (unsigned)free_sram, (unsigned)min_free_sram,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+}
+
+/**
+ * @brief 打印内部 RAM / PSRAM 的逐块明细（诊断用）
+ *
+ * 内部 RAM（约 259KB 可用）是本工程瓶颈，PSRAM（8MB）富余。
+ * heap_caps_print_heap_info 会把指定 caps 的每个堆块逐个列出（free/allocated/largest），
+ * 用来回答"到底是谁吃了内部 RAM"。
+ */
+void SystemInfo::PrintHeapDetail() {
+    ESP_LOGI(TAG, "==== 内部 RAM 逐块明细（MALLOC_CAP_INTERNAL）====");
+    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
+
+    // PSRAM 块很多，只打汇总，避免刷屏
+    ESP_LOGI(TAG, "内部 RAM: free=%u min=%u 最大连续块=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    ESP_LOGI(TAG, "PSRAM   : free=%u min=%u 最大连续块=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
 }

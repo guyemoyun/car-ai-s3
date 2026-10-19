@@ -47,6 +47,7 @@
 #include "mcp_server.h"
 #include "car_monitor.h"      // 车载监测模块
 #include "car_ui_helper.h"    // 车载界面辅助类
+#include "car_person_detect.h"  // 本地人员检测（M4）
 #include "screen_manager.h"   // 屏幕管理器
 
 #include <cstring>
@@ -635,6 +636,7 @@ void Application::Start() {
                     } else {
                         ESP_LOGE(TAG, "Failed to start camera preview task");
                     }
+                    // 注：人员检测任务必须放到 StartNetwork() 之后启动，见下方注释
                 } else {
                     ESP_LOGE(TAG, "Failed to initialize CarUIHelper");
                 }
@@ -674,6 +676,17 @@ void Application::Start() {
     // 启动网络服务
     board.StartNetwork();
     display->UpdateStatusBar(true);
+
+    // 启动人员检测任务（M4）：500ms 一次；小智会话期降到 1000ms。
+    // **必须在 StartNetwork() 之后**：esp-dl 加载模型时会瞬时占用内部 RAM，若抢在
+    // esp_wifi_init 之前，Wi-Fi 会拿不到 rx buffer → ESP_ERR_NO_MEM → abort → 重启循环；
+    // 而软复位不给触摸 IC 断电，重启后触摸会读回全 0x00 而失效。
+    // 失败只告警、不阻塞启动（预览 / 音频 / 界面均不受影响）。
+    if (CarPersonDetect::Start(500, 1000)) {
+        ESP_LOGI(TAG, "Person detect task started");
+    } else {
+        ESP_LOGW(TAG, "Person detect task NOT started (preview/audio unaffected)");
+    }
 
     // OTA版本检查和设备激活
     Ota ota;
