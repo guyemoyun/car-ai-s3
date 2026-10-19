@@ -19,7 +19,7 @@
  * - self.screen.set_brightness: 设置屏幕亮度
  * - self.screen.set_theme: 设置主题
  * - self.camera.take_photo: 拍照
- * - self.led.turn_on/off: LED控制
+ * - self.led.turn_on/off: LED控制（已移除：LED 与触摸中断共用 GPIO10，本项目不需要 LED）
  * - self.dht11.get_temperature/humidity: DHT11传感器
  * - self.myinfo.play_info: 播放信息
  * 
@@ -83,7 +83,7 @@ McpServer::~McpServer() {
  * - self.screen.set_brightness: 设置屏幕亮度(0-100)
  * - self.screen.set_theme: 设置显示主题(light/dark)
  * - self.camera.take_photo: 拍照并分析
- * - self.led.turn_on/off: GPIO10 LED控制
+ * - self.led.turn_on/off: 已移除（LED 与触摸中断共用 GPIO10，本项目不需要 LED）
  * - self.dht11.get_temperature/humidity: 温湿度传感器
  * - self.myinfo.play_info/play_all_info: 信息播报
  * 
@@ -194,77 +194,10 @@ void McpServer::AddCommonTools() {
             });  // Lambda表达式结束
     }  // if语句结束
 
-    // Add LED control tools
-    // 添加LED控制工具
-    // Add tool for turning on LED
-    // 添加打开LED的工具
-    AddTool("self.led.led_on",  // 工具名称：打开LED
-        "Turn on the LED light connected to GPIO10.",  // 工具描述：打开连接到GPIO10的LED灯
-        PropertyList(),  // 工具参数列表：无参数
-        [](const PropertyList& properties) -> ReturnValue {  // Lambda表达式：工具回调函数
-            auto& app = Application::GetInstance();  // 获取Application单例实例的引用
-            esp_err_t ret = app.GetLedCtrl().led_on();  // 调用LED控制器的led_on方法打开LED
-            if (ret == ESP_OK) {  // 检查操作是否成功
-                return "{\"success\": true, \"message\": \"LED turned on\"}";  // 成功：返回成功信息和消息
-            } else {  // 操作失败
-                return "{\"success\": false, \"message\": \"Failed to turn on LED\"}";  // 失败：返回失败信息和错误消息
-            }  // if-else语句结束
-        });  // Lambda表达式结束
-
-    // Add tool for turning off LED
-    // 添加关闭LED的工具
-    AddTool("self.led.led_off",  // 工具名称：关闭LED
-        "Turn off the LED light connected to GPIO10.",  // 工具描述：关闭连接到GPIO10的LED灯
-        PropertyList(),  // 工具参数列表：无参数
-        [](const PropertyList& properties) -> ReturnValue {  // Lambda表达式：工具回调函数
-            auto& app = Application::GetInstance();  // 获取Application单例实例的引用
-            esp_err_t ret = app.GetLedCtrl().led_off();  // 调用LED控制器的led_off方法关闭LED
-            if (ret == ESP_OK) {  // 检查操作是否成功
-                return "{\"success\": true, \"message\": \"LED turned off\"}";  // 成功：返回成功信息和消息
-            } else {  // 操作失败
-                return "{\"success\": false, \"message\": \"Failed to turn off LED\"}";  // 失败：返回失败信息和错误消息
-            }  // if-else语句结束
-        });  // Lambda表达式结束
-
-    // Add tool for getting LED state
-    //添加获取LED状态的工具
-    AddTool("self.led.get_state",  // 工具名称：获取LED状态
-        "Get current state of the LED light.",  // 工具描述：获取LED灯的当前状态
-        PropertyList(),  // 工具参数列表：无参数
-        [](const PropertyList& properties) -> ReturnValue {  // Lambda表达式：工具回调函数
-            auto& app = Application::GetInstance();  // 获取Application单例实例的引用
-            uint32_t sta = app.GetLedCtrl().led_get_state();  // 调用LED控制器的GetState方法获取LED状态
-           
-            if(sta)
-            {
-                return "{\"state\": true}";
-
-            }
-            else
-            {
-                return "{\"state\": false}";
-            }
-        
-        });  // Lambda表达式结束
-
-    AddTool("self.led.led_toggle",  // 工具名称：翻转LED状态
-        "Toggle the LED light.",  // 工具描述：切换LED灯状态
-        PropertyList(),  // 工具参数列表：无参数
-        [](const PropertyList& properties) -> ReturnValue {  // Lambda表达式：工具回调函数
-            auto& app = Application::GetInstance();  // 获取Application单例实例的引用
-            uint32_t sta = app.GetLedCtrl().led_toggle();  // 调用LED控制器的GetState方法获取LED状态
-           
-            if(sta)
-            {
-                return "{\"toggle\":on}";
-
-            }
-            else
-            {
-                return "{\"toggle\": off}";
-            }
-        
-        });  // Lambda表达式结束        
+    // 注：原有的 self.led.*（开灯/关灯/查状态/翻转）四件套已整块移除。
+    // 原因：LED 用的 GPIO10 就是触摸中断 CTP_INT，两者在同一根脚上互斥；
+    // 且本项目不需要 LED 功能，保留工具还会让小智走到这条无意义（并曾导致会话卡死）的路径。
+    // 删除后 GPIO10 只作触摸中断输入，不再被任何 LED 逻辑重配。
 
     // Add DHT11 sensor tools
     // 添加DHT11传感器工具

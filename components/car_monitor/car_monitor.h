@@ -102,6 +102,14 @@ public:
     void UpdatePersonDetection(int person_count, float confidence);
 
     /**
+     * @brief 更新车辆运动状态（由姿态传感器模块调用）
+     * @param is_moving 当前是否处于运动/振动状态
+     * @param imu_fault true=姿态传感器不可用（芯片缺失或持续读失败），此时 is_moving 无意义
+     * @note 仅作辅助状态写入快照，**不参与告警判定**（IMU 不替代车辆启停输入）
+     */
+    void UpdateMotionState(bool is_moving, bool imu_fault);
+
+    /**
      * @brief 查询是否有活跃告警
      * @return 当前活跃的告警类型
      */

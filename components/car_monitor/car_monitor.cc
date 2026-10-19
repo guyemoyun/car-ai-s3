@@ -197,6 +197,22 @@ void CarMonitor::UpdatePersonDetection(int person_count, float confidence) {
 }
 
 // ============================================================================
+// 运动状态更新（姿态传感器 QMI8658A，辅助状态）
+// ============================================================================
+
+void CarMonitor::UpdateMotionState(bool is_moving, bool imu_fault) {
+    if (!initialized_) {
+        return;
+    }
+
+    xSemaphoreTake(snapshot_mutex_, portMAX_DELAY);
+    current_snapshot_.is_moving = is_moving;
+    current_snapshot_.motion_age_ms = 0;   // 刚刚更新
+    current_snapshot_.imu_fault = imu_fault;
+    xSemaphoreGive(snapshot_mutex_);
+}
+
+// ============================================================================
 // 告警接口
 // ============================================================================
 

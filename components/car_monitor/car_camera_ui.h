@@ -14,6 +14,20 @@
 #include <cstdint>
 
 /**
+ * @struct CarDetectionBox
+ * @brief 单个检测框（源画面像素坐标，左上原点，x2/y2 为右下）
+ * @details 源画幅 320x240 与预览内区同尺寸 => 坐标为 1:1，可直接当 LVGL 摆位用。
+ *          仅存坐标与整数化置信度（本工程 newlib 为 nano 格式，%f 不可靠）。
+ */
+struct CarDetectionBox {
+    int16_t x1;          ///< 左上 x
+    int16_t y1;          ///< 左上 y
+    int16_t x2;          ///< 右下 x
+    int16_t y2;          ///< 右下 y
+    int16_t score_x100;  ///< 置信度 ×100
+};
+
+/**
  * @class CarCameraUI
  * @brief 车载摄像头页界面类
  * @details 预览区按摄像头画幅 320x240(4:3) 定尺寸；容器禁用滚动；当前无按键控件
@@ -64,6 +78,18 @@ public:
     void SetFrame(const lv_img_dsc_t* dsc);
 
     /**
+     * @brief 刷新预览画面上的检测框叠加层（M4）
+     * @param count 检测到的人数（0 = 隐藏所有框）
+     * @param boxes 检测框数组（源 320x240 坐标，与预览内区 1:1，无需换算）
+     * @param n     框数量（最多 kMaxDetections 个，超出部分忽略）
+     * @note 必须在 LVGL 锁内调用（与 SetFrame 同）；本函数只摆位/显隐，不重绘整个画面
+     */
+    void SetDetections(int count, const CarDetectionBox* boxes, int n);
+
+    /// 叠加层最多绘制的框数（模型 NMS 后通常 0~2 个，留余量）
+    static constexpr int kMaxDetections = 4;
+
+    /**
      * @brief 获取根对象
      * @return LVGL 对象指针
      */
@@ -74,6 +100,9 @@ private:
     lv_obj_t* preview_area_;        ///< 摄像头预览区（4:3 画幅）
     lv_obj_t* preview_img_;         ///< 实时画面（lv_image，320x240 1:1）
     lv_obj_t* preview_placeholder_; ///< "等待画面"占位文字，首帧到达后隐藏
+
+    lv_obj_t* overlay_;                                  ///< 检测框叠加层（透明，尺寸同预览内区）
+    lv_obj_t* detect_boxes_[kMaxDetections];              ///< 叠加层内的空心框
 
     // 回调函数指针（三颗屏幕按键已暂时移除；保留接线，便于将来恢复）
     void (*toggle_vehicle_callback_)(void);

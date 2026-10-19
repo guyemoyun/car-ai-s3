@@ -46,6 +46,17 @@ constexpr size_t kModelMinSize = 512 * 1024;  // 模型约 425 KiB，留足余�
 // 连续失败这么多次后尝试重建 detector（2Hz × 60 ≈ 30 s）
 constexpr int kRebuildAfterFailures = 60;
 
+// 每次检测最多缓存多少个框（用于叠加显示 + 日志）；模型 NMS 后通常 0~2 个
+constexpr int kMaxBoxes = 4;
+
+// 统计日志：kLogEveryDetection=true 时**每次**检测都打一行（含各框坐标），
+// 供 M4 验收统计召回率/误报率；false 时每 kLogDiv 次打一行（约 2.5 s 一行，省日志）。
+constexpr bool kLogEveryDetection = true;
+constexpr int kLogDiv = 5;
+
+// 检测框出口（摄像头页叠加层）：在检测任务上下文被调用，默认未注册
+void (*s_sink)(int count, const CarDetectionBox* boxes, int n) = nullptr;
+
 // 开发期诊断开关：true = 加载模型后打印 esp-dl 逐层内存(profile_memory) + 堆逐块明细，
 // 输出行数较多，仅诊断期开；发布前置 false。
 constexpr bool kDumpModelMemory = true;
@@ -169,6 +180,11 @@ bool CarPersonDetect::IsRunning() {
     return s_task != nullptr;
 }
 
+void CarPersonDetect::SetResultSink(void (*sink)(int count, const CarDetectionBox* boxes, int n)) {
+    s_sink = sink;
+    ESP_LOGI(TAG, "检测框出口已%s", (sink != nullptr) ? "注册" : "注销");
+}
+
 void CarPersonDetect::TaskFunc(void* arg) {
     (void)arg;
     ESP_LOGI(TAG, "Person detect task running");
@@ -232,26 +248,46 @@ void CarPersonDetect::TaskFunc(void* arg) {
             std::list<dl::detect::result_t>& res = s_det->run(img);
             int64_t t1 = esp_timer_get_time();
 
-            int count = 0;
+            // 立即把框拷成自己的坐标副本（res 下一帧就失效），供日志与叠加层使用
+            CarDetectionBox boxes[kMaxBoxes];
+            int nbox = 0;
             float best = 0.0f;
             for (const auto& r : res) {
-                count++;
                 if (r.score > best) {
                     best = r.score;
                 }
+                if (nbox < kMaxBoxes && r.box.size() >= 4) {
+                    boxes[nbox].x1 = (int16_t)r.box[0];
+                    boxes[nbox].y1 = (int16_t)r.box[1];
+                    boxes[nbox].x2 = (int16_t)r.box[2];
+                    boxes[nbox].y2 = (int16_t)r.box[3];
+                    boxes[nbox].score_x100 = (int16_t)(r.score * 100.0f + 0.5f);
+                    nbox++;
+                }
             }
+            const int count = (int)res.size();
 
             // 复用既有唯一上报入口（内部会更新 car_monitor 的 person_data）
             CarMonitorHelper::OnPersonDetectionResult(count > 0 ? 1 : 0, best);
             s_fail_streak = 0;
 
+            // 叠加显示出口：只传坐标副本，由 sink 在 LVGL 锁内摆框
+            if (s_sink != nullptr) {
+                s_sink(count, boxes, nbox);
+            }
+
             const int best_x100 = (int)(best * 100.0f + 0.5f);
             const int infer_ms = (int)((t1 - t0) / 1000);
-            if (++log_div >= 5) {  // 约每 2.5 s 一行，避免刷屏
+            if (kLogEveryDetection || ++log_div >= kLogDiv) {
                 log_div = 0;
                 // 注意：本工程 newlib 为 nano 格式，%f / %lld 不可靠，只用整数格式
                 ESP_LOGI(TAG, "检测：人数=%d 最高分=%d.%02d 耗时=%d ms", count,
                          best_x100 / 100, best_x100 % 100, infer_ms);
+                for (int i = 0; i < nbox; i++) {  // 每个框一行，便于核对框位与置信度
+                    ESP_LOGI(TAG, "  框%d：(%d,%d)-(%d,%d) 分数=%d.%02d", i,
+                             boxes[i].x1, boxes[i].y1, boxes[i].x2, boxes[i].y2,
+                             boxes[i].score_x100 / 100, boxes[i].score_x100 % 100);
+                }
             }
             if (++report_div >= 20) {  // 约每 10 s 汇报一次资源
                 report_div = 0;

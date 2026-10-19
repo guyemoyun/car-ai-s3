@@ -8,6 +8,7 @@
 #include "car_ui_helper.h"
 #include "car_monitor.h"
 #include "car_monitor_helper.h"
+#include "car_person_detect.h"   // CarPersonDetect::SetResultSink()
 #include "screen_manager.h"
 #include "board.h"               // Board::GetInstance()
 #include "camera.h"              // Camera::GetPreviewFrame()
@@ -63,6 +64,10 @@ bool CarUIHelper::Initialize()
     camera_ui->SetToggleVehicleCallback(OnToggleVehicle);
     camera_ui->SetConfirmAlertCallback(OnConfirmAlert);
     camera_ui->SetTestAlertCallback(OnTestAlert);
+
+    // 检测框叠加出口（M4）：人员检测任务出结果时把框坐标交给摄像头页绘框。
+    // 必须在 CarPersonDetect::Start() 之前注册，否则首次检测的框会丢掉。
+    CarPersonDetect::SetResultSink(OnPersonDetectResult);
 
     ESP_LOGI(TAG, "CarUIHelper initialized successfully");
     return true;
@@ -344,4 +349,23 @@ void CarUIHelper::OnTestAlert()
 {
     ESP_LOGI(TAG, "Test alert button pressed");
     CarMonitorHelper::HandleTestAlertButton();
+}
+
+void CarUIHelper::OnPersonDetectResult(int count, const CarDetectionBox* boxes, int n)
+{
+    // 本回调运行在人员检测任务上下文（CPU0/优先级 1），不在 LVGL 线程，故须自行取锁。
+    // 锁超时给短（20ms）：拿不到就丢弃这一帧的框（下一帧 500ms 后再来），
+    // 绝不阻塞检测任务——告警判定走 OnPersonDetectionResult，与本回调无关。
+    ScreenManager* scr_mgr = ScreenManager::GetInstance();
+    if (scr_mgr == nullptr) {
+        return;
+    }
+    CarCameraUI* camera_ui = scr_mgr->GetCarCameraUI();
+    if (camera_ui == nullptr) {
+        return;
+    }
+    if (lvgl_port_lock(pdMS_TO_TICKS(20))) {
+        camera_ui->SetDetections(count, boxes, n);
+        lvgl_port_unlock();
+    }
 }

@@ -51,6 +51,14 @@ public:
     static void OnPersonDetectionResult(int person_count, float confidence);
 
     /**
+     * @brief 更新车辆运动状态（由姿态传感器模块调用）
+     * @param is_moving 当前是否处于运动/振动状态
+     * @param imu_fault true=姿态传感器不可用，此时 is_moving 无意义
+     * @note 只写入快照辅助字段（is_moving / motion_age_ms / imu_fault），不参与告警判定
+     */
+    static void UpdateMotionState(bool is_moving, bool imu_fault);
+
+    /**
      * @brief 检查是否有活跃告警
      * @return 当前活跃的告警类型（ALERT_NONE表示无告警）
      */
@@ -78,4 +86,13 @@ public:
      * @return true=数据有效，false=数据无效或未初始化
      */
     static bool GetPersonDetectionData(int* person_count, float* confidence);
+
+    /**
+     * @brief 注册车载 MCP 工具（`self.car.*`）
+     * @details 注册四个工具：环境查询、状态查询、告警查询、确认告警。
+     *          全部只读快照或提交命令，与 CarMonitor 的线程安全接口对齐。
+     * @note 必须在 MCP 会话建立之前调用（Application 启动流程中
+     *       `McpServer::AddCommonTools()` 之后）；重复调用不会重复注册。
+     */
+    static void RegisterMcpTools();
 };

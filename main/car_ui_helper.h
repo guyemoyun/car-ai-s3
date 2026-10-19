@@ -8,6 +8,8 @@
 
 #include "car_ui.h"  // ← 修复：不需要 car_monitor/ 前缀
 
+struct CarDetectionBox;  // 检测框 POD（定义在 car_camera_ui.h，此处仅需指针）
+
 /**
  * @class CarUIHelper
  * @brief 车载界面辅助类
@@ -96,4 +98,13 @@ private:
      * @brief 测试告警按钮回调
      */
     static void OnTestAlert();
+
+    /**
+     * @brief 人员检测框回调（由人员检测任务调用，M4）
+     * @param count 检测到的人数
+     * @param boxes 检测框数组（源 320x240 坐标，检测任务栈上副本）
+     * @param n     框数量
+     * @note 运行在检测任务上下文（非 LVGL 线程），内部自取 LVGL 锁后再摆框
+     */
+    static void OnPersonDetectResult(int count, const CarDetectionBox* boxes, int n);
 };

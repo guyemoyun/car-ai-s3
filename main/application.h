@@ -65,7 +65,6 @@
 #include "ota.h"
 #include "audio_service.h"
 #include "device_state_event.h"
-#include "led_ctrl.h"
 #include "dht11_sensor.h"
 #include "myinfo.h"
 
@@ -274,12 +273,6 @@ public:
     AudioService& GetAudioService() { return audio_service_; }
 
     /**
-     * @brief 获取LED控制器实例
-     * @return led_ctrl的引用
-     */
-    led_ctrl& GetLedCtrl() { return led_ctrl_; }
-
-    /**
      * @brief 获取DHT11传感器实例
      * @return Dht11Sensor的引用
      */
@@ -328,7 +321,6 @@ private:
     int clock_ticks_ = 0;                                      ///< 时钟滴答计数
     TaskHandle_t check_new_version_task_handle_ = nullptr;     ///< 版本检查任务句柄
     TaskHandle_t main_event_loop_task_handle_ = nullptr;       ///< 主事件循环任务句柄
-    led_ctrl led_ctrl_;                             ///< LED控制器实例
     Dht11Sensor dht11_sensor_;                                 ///< DHT11传感器实例
     MyInfo my_info_;                                           ///< MyInfo信息播报实例
 

@@ -32,7 +32,7 @@
 ### 已完成
 
 #### ✅ 环境修复 (Oct 13)
-- 修正GPIO48 LED定义为GPIO10
+- 修正GPIO48 LED定义（保留给TF卡CMD）；LED定义与服务后续已整体删除（LED与触摸中断共用GPIO10）
 - 统一Flash模式配置为QIO
 - 更新VS Code开发工具配置
 - 启用FT6X36触摸屏驱动
@@ -279,8 +279,8 @@ LVGL更新 + 音频播报
 
 ### 环境准备
 - [x] ESP32-S3硬件配置正确
-- [x] GPIO10改为LED（从GPIO48）
 - [x] 触摸屏驱动启用
+- [x] GPIO10归还触摸中断CTP_INT（LED定义与服务已删除，本项目不使用LED）
 - [x] Flash模式QIO统一
 
 ### 代码框架

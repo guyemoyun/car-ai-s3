@@ -498,6 +498,13 @@ public:
   }
 
   /**
+   * @brief 获取板载共享 I2C 总线句柄（I2C1，SDA=GPIO1 / SCL=GPIO2）
+   * @details 供 QMI8658A 姿态传感器等后加驱动复用同一条总线（不要重复建总线）。
+   *          纯读取访问器，不改变任何既有初始化行为。
+   */
+  virtual i2c_master_bus_handle_t GetI2cBus() override { return i2c_bus_; }
+
+  /**
    * @brief 获取显示屏实例
    * @return Display* 显示屏指针
    * @override 重写基类的GetDisplay方法

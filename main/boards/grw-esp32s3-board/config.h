@@ -31,8 +31,10 @@
 #define AUDIO_CODEC_ES8311_ADDR ES8311_CODEC_DEFAULT_ADDR // ES8311 DAC默认地址
 #define AUDIO_CODEC_ES7210_ADDR 0x82                      // ES7210 ADC设备地址：0x82
 
-// 按钮和LED引脚配置
-#define BUILTIN_LED_GPIO GPIO_NUM_10        // 板载LED引脚：GPIO10（灌电流，低电平点亮）
+// 按钮引脚配置
+// 注：原先这里还有 BUILTIN_LED_GPIO = GPIO_NUM_10（板载 LED），已删除。
+// GPIO10 在本板是触摸中断 CTP_INT（见 InitializeTouch 的 int_gpio_num），
+// 驱动成 LED 输出会顶掉触摸中断；本项目不需要 LED，故不保留该定义。
 #define BOOT_BUTTON_GPIO GPIO_NUM_0         // 启动按钮引脚：GPIO0
 #define VOLUME_UP_BUTTON_GPIO GPIO_NUM_NC   // 音量加按钮引脚：未连接(NC)
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC // 音量减按钮引脚：未连接(NC)

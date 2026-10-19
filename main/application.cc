@@ -46,8 +46,10 @@
 #include "assets/lang_config.h"
 #include "mcp_server.h"
 #include "car_monitor.h"      // 车载监测模块
+#include "car_monitor_helper.h"  // 车载监测集成辅助（含 MCP 工具注册）
 #include "car_ui_helper.h"    // 车载界面辅助类
 #include "car_person_detect.h"  // 本地人员检测（M4）
+#include "qmi8658.h"          // 姿态传感器运动检测（板载 IMU）
 #include "screen_manager.h"   // 屏幕管理器
 
 #include <cstring>
@@ -571,13 +573,9 @@ void Application::Start() {
     audio_service_.Initialize(codec);
     audio_service_.Start();
 
-    /* 初始化LED控制器 */
-    esp_err_t ret = led_ctrl_.led_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize LED controller: %s", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG, "LED controller initialized successfully");
-    }
+    // 注：原在此处初始化 LED 控制器（led_ctrl_.led_init()，把 GPIO10 配成推挽输出）。
+    // 已整块移除：GPIO10 是触摸中断 CTP_INT，LED 与中断式触摸在同一根脚上互斥，
+    // 且本项目不需要 LED 功能。移除后 GPIO10 保持触摸中断输入不变。
 
     /* 初始化DHT11温湿度传感器 */
     if (!dht11_sensor_.Initialize()) {
@@ -688,6 +686,15 @@ void Application::Start() {
         ESP_LOGW(TAG, "Person detect task NOT started (preview/audio unaffected)");
     }
 
+    // 启动姿态传感器运动检测（板载 QMI8658A，0x6A，共享 I2C1）：25Hz 采样，
+    // 只产出"运动/静止"辅助状态写入快照，不参与告警判定。
+    // 芯片缺失/读失败只标记 imu_fault 并降级，不阻塞启动。
+    if (Qmi8658::StartMotionTask(40)) {
+        ESP_LOGI(TAG, "IMU motion task started");
+    } else {
+        ESP_LOGW(TAG, "IMU motion task NOT started (other features unaffected)");
+    }
+
     // OTA版本检查和设备激活
     Ota ota;
     CheckNewVersion(ota);
@@ -697,6 +704,10 @@ void Application::Start() {
 
     // 添加MCP工具
     McpServer::GetInstance().AddCommonTools();
+
+    // 添加车载 MCP 工具（self.car.*：环境/状态/告警查询、确认告警）。
+    // 必须在会话建立前注册，且此时 CarMonitor 已启动（见上文 Init + StartMonitorTask）。
+    CarMonitorHelper::RegisterMcpTools();
 
     // 根据配置选择协议
 #if 0

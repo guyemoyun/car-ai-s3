@@ -149,6 +149,7 @@ typedef struct {
     bool camera_fault;              /**< 摄像头故障 */
     bool audio_fault;               /**< 音频系统故障 */
     bool i2c_fault;                 /**< I2C总线故障 */
+    bool imu_fault;                 /**< 姿态传感器(QMI8658A)不可用：芯片缺失或持续读失败 */
 
     // 网络状态
     bool wifi_connected;            /**< WiFi连接状态 */
