@@ -212,6 +212,17 @@ void CarMonitor::UpdateMotionState(bool is_moving, bool imu_fault) {
     xSemaphoreGive(snapshot_mutex_);
 }
 
+void CarMonitor::UpdateNetworkState(bool wifi_connected, bool cloud_connected) {
+    if (!initialized_) {
+        return;
+    }
+
+    xSemaphoreTake(snapshot_mutex_, portMAX_DELAY);
+    current_snapshot_.wifi_connected = wifi_connected;
+    current_snapshot_.cloud_connected = cloud_connected;
+    xSemaphoreGive(snapshot_mutex_);
+}
+
 // ============================================================================
 // 告警接口
 // ============================================================================

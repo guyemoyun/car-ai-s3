@@ -50,10 +50,12 @@
 #include "car_ui_helper.h"    // 车载界面辅助类
 #include "car_person_detect.h"  // 本地人员检测（M4）
 #include "qmi8658.h"          // 姿态传感器运动检测（板载 IMU）
+#include "car_cloud.h"        // 巴法云上报（M6）
 #include "screen_manager.h"   // 屏幕管理器
 
 #include <cstring>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -80,6 +82,20 @@ static const char* const STATE_STRINGS[] = {
     "fatal_error",    ///< kDeviceStateFatalError
     "invalid_state"   ///< 无效状态
 };
+
+/**
+ * Listening（AutoStop 模式）连续静默超过该秒数，则主动停止监听回到 Idle。
+ *
+ * 为什么需要它：本工程没有本地 VAD 静音自动停听，也不处理服务端下发的
+ * listen stop，因此退出 Listening 只有"服务端关闭 WebSocket"这一条路。
+ * 一旦服务端没有关闭会话，设备就会长期停在 Listening —— 而 Listening 状态下
+ * 唤醒词检测是被显式关闭的（见 SetDeviceState），于是表现为"再也唤不醒"。
+ * 本超时保证设备在任何情况下都会回到"可被再次唤醒"的 Idle。
+ *
+ * 取值 8s 的依据：服务端自身的静音判停约 1~2s，本值远大于它，
+ * 所以手机会话/跟话不会因此被截断；用户说完这一轮后 8s 无话即结束会话。
+ */
+static constexpr int kListeningIdleTimeoutSec = 8;
 
 /**
  * @brief 构造函数
@@ -689,10 +705,29 @@ void Application::Start() {
     // 启动姿态传感器运动检测（板载 QMI8658A，0x6A，共享 I2C1）：25Hz 采样，
     // 只产出"运动/静止"辅助状态写入快照，不参与告警判定。
     // 芯片缺失/读失败只标记 imu_fault 并降级，不阻塞启动。
-    if (Qmi8658::StartMotionTask(40)) {
+    //
+    // 【诊断开关】kEnableImuMotion = false 时不启动 IMU 任务。
+    //   用途：二分定位"第二次唤醒小智报无法连接服务 / AFE 喂数缓冲刷屏"是否与 IMU 任务
+    //   （最近新增、25Hz I2C 采样 + 实时通路）有关。
+    constexpr bool kEnableImuMotion = true;
+    if (kEnableImuMotion && Qmi8658::StartMotionTask(40)) {
         ESP_LOGI(TAG, "IMU motion task started");
     } else {
         ESP_LOGW(TAG, "IMU motion task NOT started (other features unaffected)");
+    }
+
+    // 启动巴法云上报（M6）：独立 MQTT 客户端（bemfa.com:9501，clientId=用户私钥），
+    // 读快照上报 env/state/online（5s/30s），告警事件 1s 内上报并做 32 条有界补发。
+    // 必须在 StartNetwork() 之后（Wi-Fi 已就绪），失败只告警、不阻塞启动。
+    //
+    // 说明：此前为二分排查"唤醒后无法连接小智服务"曾临时置 false；该故障最终证实是
+    // LCD 排线接触不良引起的 I2C 卡死重启循环，与云上报占内存无关，故恢复开启。
+    // 若之后再次出现"无法连接服务"且 [DIAG] internal_heap 明显偏低，可临时置 false 复测。
+    constexpr bool kEnableCloudUpload = true;
+    if (kEnableCloudUpload && CarCloud::Start(5000, 30000)) {
+        ESP_LOGI(TAG, "Car cloud task started");
+    } else {
+        ESP_LOGW(TAG, "Car cloud task NOT started (other features unaffected)");
     }
 
     // OTA版本检查和设备激活
@@ -949,10 +984,36 @@ void Application::MainEventLoop() {
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
 
+            // AutoStop 模式下 Listening 静默超时兜底：主动停听回 Idle。
+            // 本工程退出 Listening 的路径只有"服务端关闭 WebSocket"，而 Listening 期间
+            // 唤醒词检测是关的 —— 服务端一旦不关会话，设备就永远唤不醒。这里用本地
+            // VAD 静音计时兜底，保证设备总能回到可再次唤醒的状态。
+            // （Realtime / ManualStop 不做此事：它们各自有明确的会话语义）
+            if (device_state_ == kDeviceStateListening && listening_mode_ == kListeningModeAutoStop) {
+                if (audio_service_.IsVoiceDetected()) {
+                    listening_idle_ticks_ = 0;
+                } else if (++listening_idle_ticks_ >= kListeningIdleTimeoutSec) {
+                    listening_idle_ticks_ = 0;
+                    ESP_LOGI(TAG, "监听静默 %d 秒，自动停止监听 -> IDLE（唤醒词检测重新开启）",
+                             kListeningIdleTimeoutSec);
+                    StopListening();
+                }
+            } else {
+                listening_idle_ticks_ = 0;
+            }
+
             // 每10秒打印调试信息
             if (clock_ticks_ % 10 == 0) {
                 // SystemInfo::PrintTaskCpuUsage(pdMS_TO_TICKS(1000));  // 打印任务CPU使用率
                 // SystemInfo::PrintTaskList();  // 打印任务列表
+                // 【一键判读】状态机 + 唤醒检测开关 + 内部 RAM 余量同屏输出。
+                // 用途：直接回答"再也不能唤醒"是停在哪个状态、唤醒词到底有没有开着、
+                // 内部 RAM 是否真的被压干，无需再翻整段日志。
+                ESP_LOGI(TAG, "[DIAG] state=%s wake_word=%s voice_proc=%s internal_heap=%u",
+                         STATE_STRINGS[device_state_],
+                         audio_service_.IsWakeWordRunning() ? "ON" : "OFF",
+                         audio_service_.IsAudioProcessorRunning() ? "ON" : "OFF",
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
                 SystemInfo::PrintHeapStats();
             }
         }
@@ -989,10 +1050,25 @@ void Application::OnWakeWordDetected() {
     if (device_state_ == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
 
+        // 唤醒已检出：AfeWakeWord 的 detection 任务在检出瞬间已自行 Stop()（不再 fetch），
+        // 但 AS_EVENT_WAKE_WORD_RUNNING 仍置位，audio_input 会继续喂数；接下来的
+        // OpenAudioChannel 是阻塞式 TLS 建链（可数秒），期间环缓冲只进不出 → 溢出刷屏。
+        // 这里立刻停喂，等到真正进入 Listening 时再按需关闭即可。
+        audio_service_.EnableWakeWordDetection(false);
+
         if (!protocol_->IsAudioChannelOpened()) {
+            ESP_LOGI(TAG, "Opening audio channel, internal heap free: %u bytes",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
             SetDeviceState(kDeviceStateConnecting);
             if (!protocol_->OpenAudioChannel()) {
+                // 建链失败必须显式回到 Idle：否则状态停在 Connecting，
+                // 之后即使唤醒词能检出，OnWakeWordDetected 也不走 Idle 分支，
+                // 表现为"再也唤不醒"。回到 Idle 会重新开启唤醒检测，
+                // 并由 AfeWakeWord::Start() 重置 AFE 缓冲（清掉陈旧的满量音频）。
+                ESP_LOGW(TAG, "OpenAudioChannel failed, internal heap free: %u bytes, back to IDLE",
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
                 audio_service_.EnableWakeWordDetection(true);
+                SetDeviceState(kDeviceStateIdle);
                 return;
             }
         }
@@ -1113,6 +1189,7 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);   // 显示监听中
             display->SetEmotion("neutral");
+            listening_idle_ticks_ = 0;  // 重置静默计数（自动停听兜底见 MAIN_EVENT_CLOCK_TICK）
 
             // 确保音频处理器正在运行
             if (!audio_service_.IsAudioProcessorRunning()) {

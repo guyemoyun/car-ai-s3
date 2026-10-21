@@ -5,6 +5,7 @@
 
 #include "car_monitor_helper.h"
 
+#include "application.h"   // Application::GetDeviceState()（get_status 里推导"是否在会话"）
 #include "mcp_server.h"  // McpServer / PropertyList / ReturnValue（车载 MCP 工具注册用）
 
 #include <esp_timer.h>
@@ -141,9 +142,11 @@ void CarMonitorHelper::PrintStatus() {
 }
 
 /**
- * @brief 处理用户按键（GPIO11）- 切换车辆启停状态
- * @details 当用户按下GPIO11按键时调用此函数
- * @note 行驶中→停车，停车→行驶中
+ * @brief 提交"切换车辆启停状态"命令（行驶中 ⇄ 停车）
+ * @details 只往命令队列投递 CMD_TOGGLE_VEHICLE_STATE，由 car_monitor 任务异步生效。
+ * @note 当前唯一可用入口是 MCP 工具 `self.car.toggle_vehicle_state`（另有屏幕按钮接线保留）。
+ * @warning 本板 GPIO11 被 SW3 按键占用（切换屏幕），不是车辆状态按键；
+ *          旧注释"处理用户按键（GPIO11）"已作废，别再按它去找按钮。
  */
 void CarMonitorHelper::HandleUserButtonPress() {
     CarMonitor* monitor = CarMonitor::GetInstance();
@@ -247,6 +250,17 @@ void CarMonitorHelper::UpdateMotionState(bool is_moving, bool imu_fault) {
 }
 
 /**
+ * @brief 更新网络链路状态（由云上报模块每秒调用）
+ */
+void CarMonitorHelper::UpdateNetworkState(bool wifi_connected, bool cloud_connected) {
+    CarMonitor* monitor = CarMonitor::GetInstance();
+    if (monitor == nullptr) {
+        return;
+    }
+    monitor->UpdateNetworkState(wifi_connected, cloud_connected);
+}
+
+/**
  * @brief 检查是否有活跃告警
  * @return 当前活跃的告警类型（ALERT_NONE表示无告警）
  */
@@ -341,7 +355,7 @@ bool CarMonitorHelper::GetPersonDetectionData(int* person_count, float* confiden
 
 /**
  * @brief 注册车载 MCP 工具（self.car.*）
- * @details 四个工具各司其职：环境查询、状态查询、告警查询、确认告警。
+ * @details 五个工具各司其职：环境查询、状态查询、告警查询、确认告警、切换车辆状态。
  *          所有回调只读一致快照（GetSnapshot）或提交命令（SubmitCommand），
  *          两者在 CarMonitor 内部均有锁保护，可安全地在 MCP 协议线程调用。
  * @note 数值一律用整数运算格式化成文本，避免 nano newlib 下 %f 失效。
@@ -397,6 +411,10 @@ void CarMonitorHelper::RegisterMcpTools() {
             char conf[16];
             FormatFixed1(conf, sizeof(conf), s.person_data.confidence);
 
+            // in_ai_chat_mode 快照字段无人写入，这里直接按设备状态推导（Idle/Unknown 视为不在会话）
+            const DeviceState state = Application::GetInstance().GetDeviceState();
+            const bool in_ai_chat = (state != kDeviceStateIdle && state != kDeviceStateUnknown);
+
             char buf[640];
             snprintf(buf, sizeof(buf),
                      "{\"success\": true, \"demo_mode\": %s, "
@@ -418,7 +436,7 @@ void CarMonitorHelper::RegisterMcpTools() {
                      JsonBool(s.camera_fault), JsonBool(s.audio_fault), JsonBool(s.i2c_fault),
                      JsonBool(s.imu_fault),
                      JsonBool(s.wifi_connected), JsonBool(s.cloud_connected),
-                     JsonBool(s.in_ai_chat_mode));
+                     JsonBool(in_ai_chat));
             return std::string(buf);
         });
 
@@ -472,5 +490,32 @@ void CarMonitorHelper::RegisterMcpTools() {
             }
             ESP_LOGI(TAG, "MCP 确认告警命令已提交");
             return std::string("{\"success\": true, \"message\": \"alert confirmed, local alarm muted for 30 seconds\"}");
+        });
+
+    // ---- 5) 切换车辆状态：行驶中 ⇄ 停车 ----
+    // 演示入口：本板 GPIO11 被 SW3 按键占用（切屏），拼不出"切换车辆状态"的物理按键；
+    // 摄像头页那颗屏幕按钮也已移除。所以车辆状态目前只能由命令切换（语音或将来恢复的按钮）。
+    mcp.AddTool("self.car.toggle_vehicle_state",
+        "Toggle the (simulated) vehicle state between RUNNING and PARKED. Use this when the user "
+        "asks to switch the car to parked or to running, e.g. to start the person-left reminder test. "
+        "The command is applied asynchronously, so call self.car.get_status afterwards to read the "
+        "resulting vehicle_state.",
+        PropertyList(),
+        [](const PropertyList& properties) -> ReturnValue {
+            (void)properties;
+            CarMonitor* monitor = CarMonitor::GetInstance();
+            if (monitor == nullptr) {
+                return std::string("{\"success\": false, \"message\": \"car monitor not initialized\"}");
+            }
+            CarCommand cmd;
+            cmd.type = CMD_TOGGLE_VEHICLE_STATE;
+            cmd.param = 0;
+            // 与 HandleUserButtonPress() 同一条命令路径；这里直接发队列是为了能如实回报"队列满"
+            if (!monitor->SubmitCommand(cmd)) {
+                return std::string("{\"success\": false, \"message\": \"command queue busy, please retry\"}");
+            }
+            ESP_LOGI(TAG, "MCP 车辆状态切换命令已提交");
+            return std::string("{\"success\": true, \"message\": \"vehicle state toggle submitted; "
+                               "call self.car.get_status to read the new vehicle_state\"}");
         });
 }

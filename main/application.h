@@ -313,6 +313,7 @@ private:
     volatile DeviceState device_state_ = kDeviceStateUnknown; ///< 当前设备状态
     ListeningMode listening_mode_ = kListeningModeAutoStop;   ///< 监听模式
     AecMode aec_mode_ = kAecOff;                               ///< 回声消除模式
+    int listening_idle_ticks_ = 0;                             ///< Listening(AutoStop) 连续静默秒数，用于自动停听回 Idle
     std::string last_error_message_;                           ///< 最后错误消息
     AudioService audio_service_;                               ///< 音频服务实例
 

@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cJSON.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <arpa/inet.h>
 #include "assets/lang_config.h"
 
@@ -76,7 +77,16 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
 }
 
 void WebsocketProtocol::CloseAudioChannel() {
-    websocket_.reset();
+    if (websocket_ != nullptr) {
+        // 优雅关闭：先发 WebSocket close 控制帧，让服务端按正常流程回收旧会话，
+        // 避免"客户端直接拽掉 socket"导致服务端仍占着上一会话、拒绝下一次连接。
+        ESP_LOGI(TAG, "CloseAudioChannel: sending close frame and releasing websocket (connected=%d)",
+                 websocket_->IsConnected() ? 1 : 0);
+        websocket_->Close();
+        websocket_.reset();
+        ESP_LOGI(TAG, "Websocket released, internal heap free: %u bytes",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    }
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
@@ -89,6 +99,18 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
 
     error_occurred_ = false;
+
+    // 先彻底释放上一会话的 websocket 实例，再建新连接。
+    // 旧实例上仍挂着 esp_tls 上下文（数十 KB 内部 RAM）与 ssl_receive 任务；
+    // 若等新连接（TLS 握手同样要内部 RAM）分配完才析构旧实例，容易出现内部 RAM 不足
+    // 导致建链失败。显式先 reset 可把旧资源在新建之前就归还。
+    if (websocket_ != nullptr) {
+        ESP_LOGW(TAG, "Releasing stale previous websocket before reconnect (connected=%d)",
+                 websocket_->IsConnected() ? 1 : 0);
+        websocket_.reset();
+        ESP_LOGI(TAG, "Previous websocket released, internal heap free: %u bytes",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    }
 
     auto network = Board::GetInstance().GetNetwork();
     websocket_ = network->CreateWebSocket(1);
@@ -171,9 +193,13 @@ bool WebsocketProtocol::OpenAudioChannel() {
         }
     });
 
-    ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
+    ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d (heap internal=%u bytes)",
+             url.c_str(), version_, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     if (!websocket_->Connect(url.c_str())) {
-        ESP_LOGE(TAG, "Failed to connect to websocket server");
+        ESP_LOGE(TAG, "Failed to connect to websocket server (heap internal=%u bytes) — "
+                      "若上面是 EspSsl/EspTcp 的 connect 失败多为内部 RAM 或链路问题；"
+                      "若是 handshake 失败/超时则多为服务端拒绝或链路中断",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
         return false;
     }
@@ -187,7 +213,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     // Wait for server hello
     EventBits_t bits = xEventGroupWaitBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT, pdTRUE, pdFALSE, pdMS_TO_TICKS(10000));
     if (!(bits & WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT)) {
-        ESP_LOGE(TAG, "Failed to receive server hello");
+        ESP_LOGE(TAG, "Failed to receive server hello (bits=%x, ws_connected=%d) — "
+                      "ws_connected=0 说明连接在等 hello 期间就被断开（服务端拒绝/链路断）",
+                 (unsigned)bits, websocket_->IsConnected() ? 1 : 0);
         SetError(Lang::Strings::SERVER_TIMEOUT);
         return false;
     }

@@ -49,9 +49,10 @@ constexpr int kExitWindows       = 3;   // 连续 3 窗（≈1.9 s）满足才�
 // 50 × 40ms ≈ 2 s
 constexpr int kBadStreakFault    = 50;
 
-// 标定期开关：true = 每个滑窗打一行 acc_ptp / gyro_mean / moving，
-// 供现场标定上面 4 个阈值；稳定后可置 false 减少日志。
-constexpr bool kLogEveryWindow = true;
+// 标定期开关：true = 每个滑窗打一行 acc_ptp / gyro_mean / moving，用于现场标定下面 4 个阈值。
+// 【当前状态：false】标定实测已完成（动/静读数都拿到了），关掉以减少日志量——
+// AFE 溢出警告会同步阻塞 UART，日志越少对实时通路的干扰越小。
+constexpr bool kLogEveryWindow = false;
 
 TaskHandle_t s_task = nullptr;
 

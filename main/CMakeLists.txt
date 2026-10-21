@@ -30,6 +30,7 @@ set(SOURCES "audio/audio_codec.cc"
             "car_ui_helper.cc"
             "car_person_detect.cc"
             "qmi8658.cc"
+            "car_cloud.cc"
             "screen_manager.cc"
             "main.cc"
             )

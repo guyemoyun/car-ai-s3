@@ -48,6 +48,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms) {
     }
 
     afe_config->afe_perferred_core = 1;
+    // 优先级保持上游默认值 1（曾试 5 时出现黑屏，后证实是 LCD 排线接触问题，与优先级无关）。
     afe_config->afe_perferred_priority = 1;
     afe_config->agc_init = false;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;

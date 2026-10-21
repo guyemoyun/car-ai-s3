@@ -129,11 +129,15 @@ void AudioService::Start() {
 #endif
 
     /* Start the opus codec task */
+    // 优先级 4（原 2）：编解码是"消费端"，而生产端 audio_communication 是 3。
+    // 原设置让生产端(3)在同核(CPU0)抢占消费端(2)，而编码队列深度只有 2 且 push 会阻塞，
+    // 于是生产端卡在 push → 停止 fetch AFE → 输入环缓冲只进不出而溢出刷屏。
+    // 消费端优先级必须 ≥ 生产端。
     xTaskCreate([](void* arg) {
         AudioService* audio_service = (AudioService*)arg;
         audio_service->OpusCodecTask();
         vTaskDelete(NULL);
-    }, "opus_codec", 2048 * 13, this, 2, &opus_codec_task_handle_);
+    }, "opus_codec", 2048 * 13, this, 4, &opus_codec_task_handle_);
 }
 
 void AudioService::Stop() {

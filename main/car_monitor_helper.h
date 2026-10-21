@@ -22,9 +22,14 @@ public:
     static void PrintStatus();
 
     /**
-     * @brief 处理用户按键（GPIO11）- 切换车辆启停状态
-     * @details 当用户按下GPIO11按键时调用此函数
-     * @note 行驶中→停车，停车→行驶中
+     * @brief 提交"切换车辆启停状态"命令（行驶中 ⇄ 停车）
+     * @details 只往 car_monitor 的命令队列投递 CMD_TOGGLE_VEHICLE_STATE，由 car_monitor 任务
+     *          异步生效（想确认结果请读快照的 vehicle_state）。
+     * @note 调用方：MCP 工具 `self.car.toggle_vehicle_state`（语音切换，当前唯一可用入口）；
+     *       摄像头页那颗"切换状态"屏幕按钮的接线（CarUIHelper::OnToggleVehicle）也走这里，
+     *       但该按钮控件已移除（触摸不稳时删的），接口仍保留。
+     * @warning **GPIO11 不是车辆状态按键**：本板 GPIO11 已被 SW3 占用，用途是切换屏幕
+     *          （见 grw_esp32s3_board.cc 的 SW3 注册）。旧注释"GPIO11 按键切换车辆状态"已作废。
      */
     static void HandleUserButtonPress();
 
@@ -59,6 +64,13 @@ public:
     static void UpdateMotionState(bool is_moving, bool imu_fault);
 
     /**
+     * @brief 更新网络链路状态（由云上报模块每秒调用）
+     * @param wifi_connected  Wi-Fi 是否已连上
+     * @param cloud_connected 巴法云 MQTT 是否已连上
+     */
+    static void UpdateNetworkState(bool wifi_connected, bool cloud_connected);
+
+    /**
      * @brief 检查是否有活跃告警
      * @return 当前活跃的告警类型（ALERT_NONE表示无告警）
      */
@@ -89,7 +101,7 @@ public:
 
     /**
      * @brief 注册车载 MCP 工具（`self.car.*`）
-     * @details 注册四个工具：环境查询、状态查询、告警查询、确认告警。
+     * @details 注册五个工具：环境查询、状态查询、告警查询、确认告警、切换车辆状态。
      *          全部只读快照或提交命令，与 CarMonitor 的线程安全接口对齐。
      * @note 必须在 MCP 会话建立之前调用（Application 启动流程中
      *       `McpServer::AddCommonTools()` 之后）；重复调用不会重复注册。

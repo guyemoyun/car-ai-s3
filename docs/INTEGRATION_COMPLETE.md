@@ -71,8 +71,10 @@ main/application.cc
 // 查询并打印车载监测状态（用于调试）
 CarMonitorHelper::PrintStatus();
 
-// 处理用户按键（GPIO11）- 切换车辆启停状态
+// 切换车辆启停状态（命令入口）
 CarMonitorHelper::HandleUserButtonPress();
+// ⚠️ 更正：本板 GPIO11 是 SW3 按键（切屏），不是车辆状态按钮；
+//    当前唯一入口是 MCP 工具 self.car.toggle_vehicle_state。
 
 // 处理触摸屏确认告警按钮
 CarMonitorHelper::HandleConfirmAlertButton();
@@ -244,8 +246,9 @@ void your_function() {
 ### 处理按键事件
 
 ```cpp
-// 在GPIO11按键中断处理函数中
-void gpio11_button_handler() {
+// 在“切换车辆状态”的命令入口中（当前为 MCP 工具 self.car.toggle_vehicle_state；
+// GPIO11 是 SW3 切屏键，不要挂在 gpio11 中断上）
+void toggle_vehicle_state_handler() {
     CarMonitorHelper::HandleUserButtonPress();
 }
 ```

@@ -70,6 +70,10 @@ bool AfeWakeWord::Initialize(AudioCodec* codec) {
     afe_config->aec_init = codec_->input_reference();
     afe_config->aec_mode = AEC_MODE_SR_HIGH_PERF;
     afe_config->afe_perferred_core = 1;
+    // 优先级 5 的实验已回退为上游默认值 1。
+    // 注：当时"烧录后屏幕不亮"经串口日志证实是 LCD 排线接触不良导致 PCA9557 的
+    // I2C 写超时 abort 重启死循环（与优先级无关），因此这次实验本身未得到有效结论。
+    // 若要重试调高优先级，需单独验证 AFE 溢出是否改善、且不影响 LVGL(4) 渲染。
     afe_config->afe_perferred_priority = 1;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
     
@@ -90,7 +94,16 @@ void AfeWakeWord::OnWakeWordDetected(std::function<void(const std::string& wake_
 }
 
 void AfeWakeWord::Start() {
+    // 与 Stop() 对称：重新开始检测前先清空 AFE 输入环缓冲。
+    // 唤醒检出那一刻 detection 任务会自行 Stop() 停止 fetch，但喂数端在真正切到
+    // Listening/Idle 之前可能仍在 feed（建链失败时窗口长达数秒）。此时环缓冲只进
+    // 不出，会被陈旧音频塞满；若这里不 reset 就直接 Start()，唤醒词识别会长期失效，
+    // 表现为"之后再也唤不醒"。
+    if (afe_data_ != nullptr) {
+        afe_iface_->reset_buffer(afe_data_);
+    }
     xEventGroupSetBits(event_group_, DETECTION_RUNNING_EVENT);
+    ESP_LOGI(TAG, "Wake word detection started (AFE buffer reset)");
 }
 
 void AfeWakeWord::Stop() {

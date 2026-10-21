@@ -110,6 +110,15 @@ public:
     void UpdateMotionState(bool is_moving, bool imu_fault);
 
     /**
+     * @brief 更新网络链路状态（由云上报模块调用）
+     * @param wifi_connected  Wi-Fi 是否已连上
+     * @param cloud_connected 巴法云 MQTT 是否已连上
+     * @note 这两个字段此前无人写入、恒为 false；云上报模块每秒刷新一次，
+     *       使界面/MCP/云端看到的是真实链路状态
+     */
+    void UpdateNetworkState(bool wifi_connected, bool cloud_connected);
+
+    /**
      * @brief 查询是否有活跃告警
      * @return 当前活跃的告警类型
      */

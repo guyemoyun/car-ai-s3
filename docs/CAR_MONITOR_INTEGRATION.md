@@ -107,10 +107,12 @@ void monitor_task(void* arg) {
 
 ### Step 4：处理用户交互
 
-当用户按下按键时，发送命令：
+当用户下达指令时，发送命令：
 
 ```cpp
-// GPIO11 按键（用户按钮）
+// 切换车辆状态（行驶中 ⇄ 停车）
+// ⚠️ 更正：本板 GPIO11 是 SW3 按键，用途为切换屏幕，**不是**车辆状态按钮。
+//    当前唯一入口是 MCP 工具 self.car.toggle_vehicle_state（屏幕按钮接线保留但控件已移除）。
 void handle_user_button_press() {
     CarMonitor* monitor = CarMonitor::GetInstance();
     if (monitor == nullptr) return;
@@ -188,7 +190,8 @@ void on_person_detection_result(int person_count, float confidence) {
 ## 数据流示例
 
 ```
-用户按下GPIO11按键
+用户切换车辆状态（当前入口：MCP 工具 self.car.toggle_vehicle_state；
+                   GPIO11 实为 SW3 切屏键，不参与本流程）
     ↓
 应用程序 → submit_command(CMD_TOGGLE_VEHICLE_STATE)
     ↓

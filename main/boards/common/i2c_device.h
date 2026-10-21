@@ -8,7 +8,8 @@ public:
     I2cDevice(i2c_master_bus_handle_t i2c_bus, uint8_t addr);
 
 protected:
-    i2c_master_dev_handle_t i2c_device_;
+    i2c_master_bus_handle_t i2c_bus_ = nullptr;
+    i2c_master_dev_handle_t i2c_device_ = nullptr;
 
     void WriteReg(uint8_t reg, uint8_t value);
     uint8_t ReadReg(uint8_t reg);
