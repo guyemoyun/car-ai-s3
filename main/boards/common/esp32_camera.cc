@@ -263,7 +263,23 @@ bool Esp32Camera::SetVFlip(bool enabled) {
  * @warning 如果摄像头缓冲区为空或网络连接失败，将返回错误信息
  */
 std::string Esp32Camera::Explain(const std::string& question) {
+    // fb 尺寸先留存（日志用），编码线程结束后立即归还帧缓冲：
+    // 本驱动 fb_count=1，fb_ 被占用期间预览任务只能重复拷贝旧帧 → 画面静止（"卡死"）。
+    // 此前 fb_ 直到下一次 Capture 才归还，拍照后预览会一直冻结。
+    const int fb_w = fb_ ? fb_->width : 0;
+    const int fb_h = fb_ ? fb_->height : 0;
+    auto release_fb = [this]() {
+        // 与 CopyFrameLocked（预览/推理任务持锁拷贝 fb_）互斥：
+        // 无锁归还时缓冲可能在被 memcpy 的同时回到驱动队列被 DMA 重写 → 撕裂帧
+        std::lock_guard<std::mutex> lock(fb_mutex_);
+        if (fb_ != nullptr) {
+            esp_camera_fb_return(fb_);
+            fb_ = nullptr;
+        }
+    };
+
     if (explain_url_.empty()) {
+        release_fb();  // 上游 Capture() 已持有 fb_，任何早退都要归还
         return "{\"success\": false, \"message\": \"Image explain URL or token is not set\"}";
     }
 
@@ -303,17 +319,21 @@ std::string Esp32Camera::Explain(const std::string& question) {
     http->SetHeader("Transfer-Encoding", "chunked");
     if (!http->Open("POST", explain_url_)) {
         ESP_LOGE(TAG, "Failed to connect to explain URL");
-        // Clear the queue
-        encoder_thread_.join();
+        // 先排水到编码线程的 nullptr 终止块、再 join：
+        // JPEG 超过队列容量（40×512B）时线程会阻塞在 xQueueSend(portMAX_DELAY)，
+        // 若先 join 会与排水互相等待 → 主事件循环永久死锁。排水腾出空间后
+        // 线程得以推完终止块退出，join 随即返回。
         JpegChunk chunk;
         while (xQueueReceive(jpeg_queue, &chunk, portMAX_DELAY) == pdPASS) {
             if (chunk.data != nullptr) {
                 heap_caps_free(chunk.data);
             } else {
-                break;
+                break;  // 编码线程的终止块
             }
         }
+        encoder_thread_.join();
         vQueueDelete(jpeg_queue);
+        release_fb();  // 上传失败也要归还帧缓冲，否则预览一直冻结
         return "{\"success\": false, \"message\": \"Failed to connect to explain URL\"}";
     }
     
@@ -355,6 +375,8 @@ std::string Esp32Camera::Explain(const std::string& question) {
     encoder_thread_.join();
     // 清理队列
     vQueueDelete(jpeg_queue);
+    // JPEG 编码线程已结束，fb_ 不再被使用 → 立即归还，恢复预览刷新
+    release_fb();
 
     {
         // 第四块：multipart尾部
@@ -376,6 +398,6 @@ std::string Esp32Camera::Explain(const std::string& question) {
     // Get remain task stack size
     size_t remain_stack_size = uxTaskGetStackHighWaterMark(nullptr);
     ESP_LOGI(TAG, "Explain image size=%dx%d, compressed size=%d, remain stack size=%d, question=%s\n%s",
-        fb_->width, fb_->height, total_sent, remain_stack_size, question.c_str(), result.c_str());
+        fb_w, fb_h, total_sent, remain_stack_size, question.c_str(), result.c_str());
     return result;
 }

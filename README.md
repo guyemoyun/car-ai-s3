@@ -1,191 +1,269 @@
-# 车载 AI 行车状态监测与语音交互终端
+# car-ai-s3 · 车载 AI 行车状态监测与语音交互终端
 
-项目 8 · 车载智能 · ESP32-S3 · car-ai-s3
+基于 **ESP32-S3** 的车载智能终端：本地环境监测、摄像头人员遗留检测、LVGL 三屏交互、
+离线语音唤醒 + 小智 AI 对话、巴法云 MQTT 远程查看。
 
-## 项目简介
+> 代码基线：小智 AI `xiaozhi-esp32` 1.9.4 · ESP-IDF 5.5.3 · LVGL 9.3.0 · ESP-SR · esp-dl
+> 板型：GRW ESP32-S3（ESP32-S3-WROOM-1-N16R8）
 
-本项目面向车内环境监测、人员遗留提醒和语音交互场景，基于 ESP32-S3 开发轻量化车载智能终端，在小智 AI 开源固件基础上扩展车载监测与交互功能。
+---
 
-项目目标是采集车内温湿度、光照等环境数据，通过摄像头抓拍与预览车内画面，为人员遗留监测提供图像输入；利用 FreeRTOS 组织状态监测、图像采集、音频交互、界面刷新和云端上报任务。离线交互规划基于 ESP-Skainet / ESP-SR 实现语音查询温度、播放提示语音等指令，通过 I2S + DMA 完成语音播报与异常提醒；LVGL 界面展示环境数据、抓拍画面和设备状态。联网后规划通过 MQTT 将监测数据上传至巴法云，供手机远程查看，并结合小智 AI 提供智能问答与行车助手功能。
+## 1. 项目能做什么
 
-> 以下为项目目标与功能规划；当前代码基础和待开发内容见“当前代码状态”。
+| 能力 | 实现 | 状态 |
+| --- | --- | --- |
+| 环境监测 | 温湿度/光照数据通道，`CarSnapshot` 100 ms 刷新 | 演示源已通，真实传感器接口预留 |
+| 人员遗留检测 | GC0308 摄像头 + esp-dl `pedestrian_detect`（PICO_S8_V1） | 已上板 |
+| 本地告警 | 停车 15 s 后连续 3 次检测到人触发；确认后静音 30 s | 已上板 |
+| 车载界面 | 数据页 / 摄像头页 / 聊天页，SW3 循环切换，两页禁滚动 | 已上板 |
+| 实时预览 | 摄像头页 320×240、10 FPS，检测框叠加 | 已上板 |
+| 语音交互 | AFE WakeNet9「你好小智」、Opus 编解码、WebSocket 会话 | 已上板 |
+| 语音查询 | MCP `self.car.*`：环境、状态、告警、确认、车辆启停 | 已上板 |
+| 云端上报 | 巴法云 MQTT：`env` / `state` / `alarm` / `online` | 已上板 |
+| OTA | 双 6 MB OTA 槽，版本检查与回滚 | 已接入 |
+| 姿态检测 | QMI8658A 25 Hz，仅作辅助状态，不参与告警 | 已上板 |
 
-## 功能规划
+### 明确边界
 
-| 模块 | 目标功能 |
+- **环境数据当前是演示源**：`CarMonitor::Init(true)` 使用 `VirtualSensors`，
+  `Dht11Sensor` 也是虚拟数据。真实 DHT11/光照传感器接入点已留在
+  `CarMonitor::UpdateEnvironmentData()`，不影响 UI、MCP、云端和告警框架。
+- **温度/湿度告警未启用**：阈值与滞回参数已定义，函数仍是占位实现。
+- **屏幕按钮已移除**：摄像头页原有三颗触摸按钮因早期触摸不稳定被移除，回调接口保留；
+  当前交互以 SW3 切屏、BOOT 键会话控制、语音/MCP 为主。
+- **巴法云只传监测数据**，语音链路仍走小智 WebSocket 服务。
+
+---
+
+## 2. 硬件
+
+| 模块 | 型号 / 参数 | 接口 |
+| --- | --- | --- |
+| 主控 | ESP32-S3-WROOM-1-N16R8，双核 LX7 240 MHz，512 KB SRAM | — |
+| 存储 | 8 MB Octal PSRAM（80 MHz）+ 16 MB QIO Flash | — |
+| 显示 | ST7796S，480×320，RGB565 | SPI3 80 MHz（MOSI 40 / SCLK 41 / DC 39 / BL 42） |
+| 触摸 | FT6336U | I2C1 0x38，INT=GPIO10，400 kHz |
+| 摄像头 | GC0308 DVP，QVGA 320×240，RGB565，XCLK 24 MHz | D0~D7 / VSYNC 3 / HREF 46 / PCLK 7 |
+| 音频 DAC | ES8311 | I2S 24 kHz（MCLK 38 / BCLK 14 / WS 13 / DOUT 45） |
+| 音频 ADC | ES7210，4 路 MIC 可选，MIC + AEC 参考双通道 | I2S（DIN 12） |
+| IO 扩展 | PCA9557 0x19：屏背光 / 功放 / 摄像头电源 | I2C1 |
+| 姿态 | QMI8658A 0x6A，25 Hz | I2C1 |
+| 按键 | BOOT=GPIO0，SW3=GPIO11 | GPIO |
+
+共享 I2C1（SDA=1 / SCL=2）挂载 PCA9557、ES8311、ES7210、FT6336U、QMI8658A 与
+GC0308 SCCB；SPI3 只用于 LCD；I2S 独立音频链路。
+
+---
+
+## 3. 软件架构
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Application：设备状态机 / 主事件循环 / WebSocket / OTA      │
+│ ScreenManager：聊天页 · 数据页 · 摄像头页                  │
+├────────────────────────────────────────────────────────────┤
+│ CarMonitor：CarSnapshot 一致快照 / 告警状态机 / 命令队列    │
+│ CarMonitorHelper：MCP self.car.* / 人员结果入口            │
+├────────────────────────────────────────────────────────────┤
+│ CarUIHelper    CarPersonDetect    CarCloud    AudioService  │
+│ 数据页 500ms   esp-dl 推理        巴法云 MQTT  AFE/Opus     │
+├────────────────────────────────────────────────────────────┤
+│ GRW Board：I2C1 / SPI3 / I2S / DVP / GPIO / PCA9557         │
+└────────────────────────────────────────────────────────────┘
+```
+
+### FreeRTOS 任务（核心）
+
+| 任务 | 核 | 优先级 | 栈 | 周期 | 职责 |
+| --- | --- | --- | --- | --- | --- |
+| `audio_input` | — | 8 | 6 KB | I2S DMA | 音频输入，硬实时 |
+| `car_monitor` | — | 5 | 4 KB | 100 ms | 环境/告警状态机 |
+| `car_ui_update` | — | 5 | 4 KB | 500 ms | 数据页刷新 |
+| `opus_codec` | — | 4 | 26 KB | 队列 | Opus 编解码 |
+| `audio_output` | — | 4 | 4 KB | 队列 | TTS 播放 |
+| `LVGL` | CPU1 | 4 | — | 33 ms | 渲染/推屏 |
+| `main_event_loop` | — | 3 | 8 KB | 事件组 | 状态机/会话 |
+| `cam_preview` | CPU0 | 3 | 4 KB | 100 ms | 预览取帧 |
+| `audio_communication` | — | 3 | 4 KB | AFE | 音频处理搬运 |
+| `audio_detection` | — | 3 | 4 KB | AFE | 唤醒词检测 |
+| `car_cloud` | CPU0 | 2 | 5 KB | 1 s | 巴法云上报 |
+| `imu_motion` | CPU0 | 2 | 2.5 KB | 40 ms | 运动检测 |
+| `encode_wake_word` | — | 2 | 28 KB（PSRAM） | 事件 | 唤醒词编码 |
+| `person_detect` | CPU0 | 1 | 4 KB | 500/1000 ms | esp-dl 推理 |
+
+> 设计原则：硬实时音频最高；消费端不低于生产端；图像/云/推理钉 CPU0，
+> LVGL 钉 CPU1；回调只置事件位，耗时操作统一 `Schedule()` 到主循环。
+
+---
+
+## 4. 内存与性能设计
+
+| 资源 | 用量 / 策略 |
 | --- | --- |
-| 环境监测 | 通过环境传感器采集车内温湿度，使用 ADC 采集模拟光照等信号；具体接口以所选传感器为准，并设置异常阈值。 |
-| 图像与人员遗留监测 | 摄像头定时或按需抓拍，显示车内画面；后续结合人员检测结果与车辆状态实现遗留提醒。 |
-| FreeRTOS 多任务 | 协调状态监测、图像采集、音频交互、LVGL 刷新和云端上报，处理共享数据同步与任务间通信。 |
-| 离线语音 | 基于 ESP-Skainet / ESP-SR 扩展离线指令识别，支持查询温度、播放提示语音，并在断网时保留本地基础交互。 |
-| 音频播报 | 使用板载麦克风、音频芯片和扬声器，通过 I2S + DMA 完成音频采集、提示语音播放与异常播报。 |
-| LVGL 人机界面 | 展示温湿度、光照、摄像头抓拍画面、联网状态和告警状态。 |
-| 联网与云端交互 | 通过 Wi-Fi 联网、MQTT 上报巴法云，支持手机远程查看；对接小智 AI 完成语音问答与行车助手交互。 |
+| 内部 SRAM | 512 KB；开机静态约 253 KB，动态堆约 259 KB；64 KB 预留 DMA；普通内部堆约 195 KB |
+| 内部 RAM 水位 | 稳态空闲 32–33 KB，全周期最低 9–17 KB |
+| LVGL 绘制缓冲 | 480×15×2 B×双缓冲 = **28.8 KB**，必须在内部 DMA RAM |
+| PSRAM 8 MB | 摄像头帧 2×150 KB、预览双缓冲 2×150 KB、检测帧 150 KB、LVGL 图片缓存 2 MB、esp-dl 张量、AFE 工作区、唤醒词栈 28 KB |
+| Flash 16 MB | 双 OTA 各 6 MB（固件 5.86 MB）、ESP-SR 模型 960 KB、人员检测模型 1 MB、NVS/otadata/phy |
+| 屏幕带宽 | 480×320×2 = 307 200 B/帧，SPI 80 MHz 纯传输约 30.7 ms；拆页 + 禁滚动后脏区降到几 KB |
+| 云端 | 巴法云 9501 非 TLS；env/state 5 s，online 30 s，告警 ≤1 s、断线缓存 32 条 |
 
-## 硬件组成
+关键优化：
 
-| 模块 | 硬件基础 |
+1. LVGL 缓冲 30 行 → 15 行，省 28.8 KB，触摸恢复灵敏；
+2. 车载界面拆成数据页/摄像头页并禁用滚动，解决 SPI 带宽卡顿；
+3. 数据页 500 ms 刷新 + 文本去重，减少无意义重绘；
+4. 预览只在摄像头页取帧（10 FPS），会话期人员检测降频到 1 s；
+5. 巴法云延迟 15 s 启动，避开 OTA/模型/AFE 的内部 RAM 峰值；
+6. 会写 NVS/OTA 的任务绝不使用 PSRAM 栈。
+
+详细账本与取舍见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+---
+
+## 5. 快速开始
+
+### 5.1 环境
+
+- ESP-IDF **5.5.3**（VS Code ESP-IDF 扩展或命令行）
+- 目标：`esp32s3`
+- Python 依赖由 ESP-IDF 管理
+
+### 5.2 构建与烧录
+
+```bash
+idf.py set-target esp32s3
+idf.py build
+idf.py -p <PORT> flash monitor
+```
+
+首次烧录会同时写入：
+
+- `0x10000`：`srmodels/srmodels.bin`（ESP-SR 唤醒模型，约 291 KB）
+- `0xD00000`：`espdl_models/pedestrian_detect.espdl`（人员检测模型，约 435 KB）
+
+分区表见 [partitions.csv](partitions.csv)。
+
+### 5.3 配置
+
+- **Wi-Fi**：首次上电按小智配网流程连接 2.4 GHz 网络；启动阶段 BOOT 键可触发重新配网。
+- **巴法云**：在 NVS 命名空间 `car_cloud` 写入：
+
+| 键 | 说明 |
 | --- | --- |
-| 主控与存储 | ESP32-S3-WROOM-1-N16R8，16 MB Flash、8 MB Octal PSRAM。 |
-| 显示 | LCD 显示屏，配合 LVGL 展示环境数据、抓拍画面和设备状态。 |
-| 摄像头 | DVP 摄像头，用于车内画面抓拍与预览，帧缓冲使用 PSRAM。 |
-| 音频 | 麦克风、音频编解码器、功放与扬声器，通过 I2S + DMA 完成采集与播报。 |
-| 通信 | Wi-Fi 联网，用于云端数据上报与小智 AI 交互。 |
-| 环境传感器 | 温湿度与光照传感器，具体型号和采集接口按项目需求选定。 |
+| `uid` | 巴法云用户私钥（作为 MQTT clientId） |
+| `prefix` | 可选主题前缀，只能含字母和数字 |
 
-温湿度传感器若采用数字接口，应使用对应驱动读取；模拟光照等信号通过 ADC 采集。
+默认主题：`env` / `state` / `alarm` / `online`。需在巴法云控制台提前创建。
+代码中保留了联调兜底私钥，正式部署应改为纯 NVS 配置。
 
-## 当前代码状态
+- **小智 AI**：使用 xiaozhi.me 控制台绑定设备，选择 Qwen 实时模型。
 
-当前仓库已包含以下代码基础，描述的是源码现状，实际运行效果需结合编译、烧录和硬件联调确认：
+---
 
-- **外设驱动**：工程包含 LCD 显示、DVP 摄像头及 I2S 音频相关代码，为图像采集、界面展示和语音交互提供基础。
-- **语音与界面**：工程包含 ESP-SR 离线唤醒、音频处理、LVGL 显示和小智 AI 通信相关代码，作为车载交互功能的开发基础。
-- **温湿度接口**：[Dht11Sensor](main/dht11_sensor.cc)当前生成虚拟温湿度数据；[MCP 服务](main/mcp_server.cc)已提供温度、湿度和温湿度组合查询接口。接入真实传感器前，数据仅用于功能演示。
-- **云端通信**：仓库包含小智 AI 使用的 WebSocket / MQTT + UDP 通信实现；巴法云监测数据上报属于后续独立接入内容。
-- **待开发与验证**：真实温湿度与光照采集、车载监测界面、人员遗留检测与告警、离线指令识别、巴法云上报以及多任务稳定性联调。
+## 6. 交互方式
 
-## 开发计划
+| 操作 | 效果 |
+| --- | --- |
+| 说「你好小智」 | 唤醒并开始语音会话 |
+| BOOT 键 | 切换聊天状态；启动阶段未联网时触发配网 |
+| SW3 键 | 聊天页 → 数据页 → 摄像头页 → 聊天页 |
+| 语音「车里温度多少」 | LLM 调用 `self.car.get_environment` |
+| 语音「车里有人吗」 | LLM 调用 `self.car.get_status` |
+| 语音「确认告警」 | `self.car.confirm_alert`，静音 30 s |
+| 语音「切换到停车状态」 | `self.car.toggle_vehicle_state` |
+| 巴法云控制台/手机 | 查看 `env` / `state` / `alarm` / `online` |
 
-[完整项目架构、代码实现与硬件移植计划](docs/development-plan.md)
+MCP 工具全部只读快照或投命令队列，不直接跨任务操作硬件。
 
-该文档记录模块接口、硬件移植、资源分配、M0～M8 开发步骤和验收标准；当前尚未开始代码实现。
+---
 
-## 专业技能
+## 7. 云端数据格式
 
-ESP-IDF 嵌入式开发、FreeRTOS 多任务调度与同步、ADC 环境信号采集与传感器驱动、摄像头抓拍与预览、I2S + DMA 音频采集与播报、ESP-Skainet / ESP-SR 离线语音、LVGL 人机界面、Wi-Fi 联网、MQTT 数据上传、巴法云远程监控、小智 AI 语音交互。
+| 主题 | 周期 | 示例 |
+| --- | --- | --- |
+| `env/up` | 5 s | `{"v":1,"ts":123456,"demo":true,"temp":25.3,"temp_ok":true,"hum":58.0,"hum_ok":true,"light":42.5,"light_ok":true}` |
+| `state/up` | 5 s | `{"v":1,"veh":"PARKED","person":"PRESENT","cnt":1,"conf":0.91,"moving":0,"imu_ok":1,"alert":"person_left","alert_ok":0,"fault":"none","wifi":1,"cloud":1,"demo":1}` |
+| `alarm/set` | 事件 | `{"v":1,"ts":123456,"seq":3,"event":"raise","type":"person_left"}` |
+| `online/up` | 30 s | `{"v":1,"ts":123456,"boot":7,"uptime_s":123}` |
 
-## 上游项目说明
+设计要点：
 
-本项目基于虾哥开源的小智 AI（xiaozhi-esp32）固件进行场景扩展，沿用仓库的 MIT 许可证。下方保留上游硬件、开发环境与协议资料，便于继续开发。
+- 周期数据用 `/up`（只更新云端，不推送订阅者），告警用 `/set`（主动推送）；
+- 负载控制在 200 B 内，规避巴法云单条消息长度限制；
+- 数据失效时字段发 `null`，不把旧值当实时值；
+- 断线期间告警最多缓存 32 条，重连后 FIFO 补发；
+- MQTT 客户端不频繁销毁重建，避免连接风暴。
 
-上游其他语言说明：[English](README_en.md) · [日本語](README_ja.md)
+---
 
-### 上游演示视频
+## 8. 文档
 
-👉 [人类：给 AI 装摄像头 vs AI：当场发现主人三天没洗头【bilibili】](https://www.bilibili.com/video/BV1bpjgzKEhd/)
+| 文档 | 内容 |
+| --- | --- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 框架、启动时序、FreeRTOS、内存账本、外设协同、数据流、MQTT 设计 |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 问题现象、根因链、修复、验证与经验总结 |
+| [docs/INTERVIEW_GUIDE.md](docs/INTERVIEW_GUIDE.md) | 30 秒 / 1 分钟 / 3 分钟项目解说词与高频追问 |
+| [docs/DEV_PROGRESS.md](docs/DEV_PROGRESS.md) | 开发进度、板级事实、managed_components 补丁记录 |
+| [docs/ESP32_MEMORY_IMPROVEMENT_PLAN.md](docs/ESP32_MEMORY_IMPROVEMENT_PLAN.md) | 内部 RAM 后续优化方案（暂不实施） |
+| [docs/esp32-memory-guide/esp32-memory-guide.html](docs/esp32-memory-guide/esp32-memory-guide.html) | ESP32-S3 内存图文指南 |
+| [docs/mcp-usage.md](docs/mcp-usage.md) | MCP 物联网控制用法 |
+| [docs/mcp-protocol.md](docs/mcp-protocol.md) | MCP 协议交互流程 |
+| [docs/mqtt-udp.md](docs/mqtt-udp.md) | MQTT + UDP 混合通信协议 |
+| [docs/websocket.md](docs/websocket.md) | 小智 WebSocket 协议 |
 
-👉 [手工打造你的 AI 女友，新手入门教程【bilibili】](https://www.bilibili.com/video/BV1XnmFYLEJN/)
+---
 
-## 上游硬件参考
+## 9. 项目结构
 
-### 面包板手工制作实践
+```
+car-ai-s3/
+├── main/
+│   ├── application.cc/.h          # 启动、主事件循环、状态机
+│   ├── car_cloud.cc/.h            # 巴法云 MQTT
+│   ├── car_monitor_helper.cc/.h   # 快照封装 + self.car.* MCP
+│   ├── car_person_detect.cc/.h    # esp-dl 人员检测
+│   ├── car_ui_helper.cc/.h        # 数据页刷新 + 摄像头预览
+│   ├── screen_manager.cc/.h       # 三屏管理
+│   ├── dht11_sensor.cc/.h         # 温湿度数据源（当前虚拟）
+│   ├── qmi8658.cc/.h              # QMI8658A IMU
+│   ├── myinfo.cc/.h               # 语音播报信息
+│   ├── audio/                     # AudioService / AFE / Opus / 编解码
+│   ├── boards/
+│   │   ├── grw-esp32s3-board/     # 本板引脚与初始化
+│   │   └── common/                # 摄像头、按键、板级基类
+│   ├── display/                   # LCD/OLED + LVGL 端口
+│   └── protocols/                 # WebSocket / MQTT
+├── components/
+│   ├── car_monitor/               # 快照、业务、数据页、摄像头页
+│   └── esp_lcd_touch_ft6x36/      # FT6336U 驱动（含 0x86 修复）
+├── docs/                          # 架构、问题、面试、协议文档
+├── partitions.csv                 # 16 MB 分区表
+├── sdkconfig.defaults             # 固化配置
+└── sdkconfig.defaults.esp32s3     # S3 专用配置
+```
 
-详见飞书文档教程：
+---
 
-👉 [《小智 AI 聊天机器人百科全书》](https://ccnphfhqs21z.feishu.cn/wiki/F5krwD16viZoF0kKkvDcrZNYnhb?from=from_copylink)
+## 10. 已知限制与后续计划
 
-面包板效果图如下：
+- 接入真实 DHT11 / 光照传感器，启用温度/湿度告警（阈值与滞回已定义）；
+- 触摸稳定后恢复摄像头页三颗屏幕按钮；
+- 应用固件已占 6 MB OTA 槽约 93%，后续加功能需裁剪资源或调整分区；
+- 如需继续提帧率，只能减少每帧字节数，或绕开 `esp_lcd` 自建 PSRAM DMA 通路；
+- 多设备部署使用 NVS `car_cloud/prefix` 区分主题。
 
-![面包板效果图](docs/v1/wiring2.jpg)
+---
 
-### 支持 70 多个开源硬件（仅展示部分）
+## 11. 上游与许可
 
-- <a href="https://oshwhub.com/li-chuang-kai-fa-ban/li-chuang-shi-zhan-pai-esp32-s3-kai-fa-ban" target="_blank" title="立创·实战派 ESP32-S3 开发板">立创·实战派 ESP32-S3 开发板</a>
-- <a href="https://github.com/espressif/esp-box" target="_blank" title="乐鑫 ESP32-S3-BOX3">乐鑫 ESP32-S3-BOX3</a>
-- <a href="https://docs.m5stack.com/zh_CN/core/CoreS3" target="_blank" title="M5Stack CoreS3">M5Stack CoreS3</a>
-- <a href="https://docs.m5stack.com/en/atom/Atomic%20Echo%20Base" target="_blank" title="AtomS3R + Echo Base">M5Stack AtomS3R + Echo Base</a>
-- <a href="https://gf.bilibili.com/item/detail/1108782064" target="_blank" title="神奇按钮 2.4">神奇按钮 2.4</a>
-- <a href="https://www.waveshare.net/shop/ESP32-S3-Touch-AMOLED-1.8.htm" target="_blank" title="微雪电子 ESP32-S3-Touch-AMOLED-1.8">微雪电子 ESP32-S3-Touch-AMOLED-1.8</a>
-- <a href="https://github.com/Xinyuan-LilyGO/T-Circle-S3" target="_blank" title="LILYGO T-Circle-S3">LILYGO T-Circle-S3</a>
-- <a href="https://oshwhub.com/tenclass01/xmini_c3" target="_blank" title="虾哥 Mini C3">虾哥 Mini C3</a>
-- <a href="https://oshwhub.com/movecall/cuican-ai-pendant-lights-up-y" target="_blank" title="Movecall CuiCan ESP32S3">璀璨·AI 吊坠</a>
-- <a href="https://github.com/WMnologo/xingzhi-ai" target="_blank" title="无名科技Nologo-星智-1.54">无名科技 Nologo-星智-1.54TFT</a>
-- <a href="https://www.seeedstudio.com/SenseCAP-Watcher-W1-A-p-5979.html" target="_blank" title="SenseCAP Watcher">SenseCAP Watcher</a>
-- <a href="https://www.bilibili.com/video/BV1BHJtz6E2S/" target="_blank" title="ESP-HI 超低成本机器狗">ESP-HI 超低成本机器狗</a>
+- 语音交互、协议与板级框架基于 [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32)（MIT）；
+- 人员检测基于乐鑫 [esp-dl](https://github.com/espressif/esp-dl) 与
+  `pedestrian_detect`（PICO_S8_V1）；
+- 语音前端基于乐鑫 ESP-SR（AFE + WakeNet9）；
+- 界面基于 LVGL 9.3.0 与 `esp_lvgl_port`；
+- 本项目沿用 MIT 许可证，见 [LICENSE](LICENSE)。
 
-<div style="display: flex; justify-content: space-between;">
-  <a href="docs/v1/lichuang-s3.jpg" target="_blank" title="立创·实战派 ESP32-S3 开发板">
-    <img src="docs/v1/lichuang-s3.jpg" width="240" />
-  </a>
-  <a href="docs/v1/espbox3.jpg" target="_blank" title="乐鑫 ESP32-S3-BOX3">
-    <img src="docs/v1/espbox3.jpg" width="240" />
-  </a>
-  <a href="docs/v1/m5cores3.jpg" target="_blank" title="M5Stack CoreS3">
-    <img src="docs/v1/m5cores3.jpg" width="240" />
-  </a>
-  <a href="docs/v1/atoms3r.jpg" target="_blank" title="AtomS3R + Echo Base">
-    <img src="docs/v1/atoms3r.jpg" width="240" />
-  </a>
-  <a href="docs/v1/magiclick.jpg" target="_blank" title="神奇按钮 2.4">
-    <img src="docs/v1/magiclick.jpg" width="240" />
-  </a>
-  <a href="docs/v1/waveshare.jpg" target="_blank" title="微雪电子 ESP32-S3-Touch-AMOLED-1.8">
-    <img src="docs/v1/waveshare.jpg" width="240" />
-  </a>
-  <a href="docs/v1/lilygo-t-circle-s3.jpg" target="_blank" title="LILYGO T-Circle-S3">
-    <img src="docs/v1/lilygo-t-circle-s3.jpg" width="240" />
-  </a>
-  <a href="docs/v1/xmini-c3.jpg" target="_blank" title="虾哥 Mini C3">
-    <img src="docs/v1/xmini-c3.jpg" width="240" />
-  </a>
-  <a href="docs/v1/movecall-cuican-esp32s3.jpg" target="_blank" title="CuiCan">
-    <img src="docs/v1/movecall-cuican-esp32s3.jpg" width="240" />
-  </a>
-  <a href="docs/v1/wmnologo_xingzhi_1.54.jpg" target="_blank" title="无名科技Nologo-星智-1.54">
-    <img src="docs/v1/wmnologo_xingzhi_1.54.jpg" width="240" />
-  </a>
-  <a href="docs/v1/sensecap_watcher.jpg" target="_blank" title="SenseCAP Watcher">
-    <img src="docs/v1/sensecap_watcher.jpg" width="240" />
-  </a>
-  <a href="docs/v1/esp-hi.jpg" target="_blank" title="ESP-HI 超低成本机器狗">
-    <img src="docs/v1/esp-hi.jpg" width="240" />
-  </a>
-</div>
-
-## 软件
-
-### 固件烧录
-
-新手第一次操作建议先不要搭建开发环境，直接使用免开发环境烧录的固件。
-
-固件默认接入 [xiaozhi.me](https://xiaozhi.me) 官方服务器，个人用户注册账号可以免费使用 Qwen 实时模型。
-
-👉 [新手烧录固件教程](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS)
-
-### 开发环境
-
-- Cursor 或 VSCode
-- 安装 ESP-IDF 插件，选择 SDK 版本 5.4 或以上
-- Linux 比 Windows 更好，编译速度快，也免去驱动问题的困扰
-- 本项目使用 Google C++ 代码风格，提交代码时请确保符合规范
-
-### 开发者文档
-
-- [自定义开发板指南](main/boards/README.md) - 学习如何为小智 AI 创建自定义开发板
-- [MCP 协议物联网控制用法说明](docs/mcp-usage.md) - 了解如何通过 MCP 协议控制物联网设备
-- [MCP 协议交互流程](docs/mcp-protocol.md) - 设备端 MCP 协议的实现方式
-- [MQTT + UDP 混合通信协议文档](docs/mqtt-udp.md)
-- [一份详细的 WebSocket 通信协议文档](docs/websocket.md)
-
-## 大模型配置
-
-如果你已经拥有一个小智 AI 聊天机器人设备，并且已接入官方服务器，可以登录 [xiaozhi.me](https://xiaozhi.me) 控制台进行配置。
-
-👉 [后台操作视频教程（旧版界面）](https://www.bilibili.com/video/BV1jUCUY2EKM/)
-
-## 相关开源项目
-
-在个人电脑上部署服务器，可以参考以下第三方开源的项目：
-
-- [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) Python 服务器
-- [joey-zhou/xiaozhi-esp32-server-java](https://github.com/joey-zhou/xiaozhi-esp32-server-java) Java 服务器
-- [AnimeAIChat/xiaozhi-server-go](https://github.com/AnimeAIChat/xiaozhi-server-go) Golang 服务器
-
-使用小智通信协议的第三方客户端项目：
-
-- [huangjunsen0406/py-xiaozhi](https://github.com/huangjunsen0406/py-xiaozhi) Python 客户端
-- [TOM88812/xiaozhi-android-client](https://github.com/TOM88812/xiaozhi-android-client) Android 客户端
-- [100askTeam/xiaozhi-linux](http://github.com/100askTeam/xiaozhi-linux) 百问科技提供的 Linux 客户端
-- [78/xiaozhi-sf32](https://github.com/78/xiaozhi-sf32) 思澈科技的蓝牙芯片固件
-- [QuecPython/solution-xiaozhiAI](https://github.com/QuecPython/solution-xiaozhiAI) 移远提供的 QuecPython 固件
-
-## Star History
-
-<a href="https://star-history.com/#78/xiaozhi-esp32&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=78/xiaozhi-esp32&type=Date" />
- </picture>
-</a>
+> 上游 README 中的多板型图片与硬件清单不再维护；本项目的板级事实以
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 和
+> [docs/DEV_PROGRESS.md](docs/DEV_PROGRESS.md) 为准。

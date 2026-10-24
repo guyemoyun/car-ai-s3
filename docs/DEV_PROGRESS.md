@@ -1,128 +1,142 @@
 # car-ai-s3 开发进度与交接
 
-> **面向新对话窗口：先读本文件即可接上进度。**
-> 板级事实（引脚表、屏参、触摸规格出处、"为什么"的详细论证）不在此重复，
-> 都在技能 **`esp32s3-dev`** 的 `references/board-hardware.md`（§2.3 / §8.4–8.8 / §16）、
-> `references/troubleshooting.md`（§5.6）、`references/s3-config.md`（§九）里。
+> 面向新对话窗口/接手的同学：先读本文件，再按需跳转。
+> 项目总览：[../README.md](../README.md)
+> 架构与内存账本：[ARCHITECTURE.md](ARCHITECTURE.md)
+> 问题解决记录：[TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+> 面试解说词：[INTERVIEW_GUIDE.md](INTERVIEW_GUIDE.md)
 >
-> 工程：`car-ai-s3`　板：GRW ESP32-S3 小智开发板　更新：2026-10
+> 工程：`car-ai-s3`　板：GRW ESP32-S3　更新：2026-10-22
 
 ---
 
-## 一、状态总览
+## 一、当前状态
 
 | 事项 | 状态 |
 | --- | --- |
-| 屏保模式 | ✅ 已彻底删除（源码 / 文档 0 残留） |
-| 车载界面 | ✅ 已拆成 **数据页 + 摄像头页**，SW3 三页循环切换，两页均**禁用滚动**（已上板验证正常） |
-| 性能监视器（SYSMON/PERF） | ✅ 已摘除（`sdkconfig` + `sdkconfig.defaults`） |
-| 触摸阈值 | **20**（芯片实测上电默认 15；组件自带默认 48） |
-| 触摸坐标变换 | `x_max=320` / `y_max=480` / `swap_xy=1` / `mirror_x=0` / `mirror_y=1` |
-| **触摸 Monitor 预防写入** | ⭐ **已写入源码并编译进固件（2026-10-16 重编，0 error），待上板烧录验证**（见第二节） |
-| 项目文档 | ✅ `docs/` 三份已同步新架构，并修正了文档里那个**代码中并不存在**的 `ToggleCarMonitorScreen()` 引用 |
-| 摄像头页真实画面 | ⬜ 未做，目前是 4:3 占位区（300×225） |
+| 显示 / LVGL 三屏 | 已完成并上板 |
+| 数据页 + 摄像头页拆页、禁滚动 | 已完成并上板 |
+| 摄像头实时预览 + 检测框叠加 | 已完成并上板 |
+| 人员遗留告警 | 已完成并上板 |
+| 小智语音会话 / 二次唤醒 | 已完成并上板 |
+| 巴法云 env/state/alarm/online | 已完成，云端可达 |
+| 巴法云延迟启动 + 失败重试 | 已完成 |
+| OTA 双槽 + 版本检查 | 已接入 |
+| QMI8658A 运动检测 | 已接入（辅助状态，不参与告警） |
+| 真实 DHT11 / 光照传感器 | 未接，当前为演示源 |
+| 温度/湿度告警 | 阈值已定义，函数未启用 |
+| 摄像头页屏幕按钮 | 已移除，回调接口保留 |
+| 内部 RAM 后续优化 | 方案见 `ESP32_MEMORY_IMPROVEMENT_PLAN.md`，暂不实施 |
 
 ---
 
-## 二、⭐ 本次固件改动（重点）：禁止触摸 IC 自动进入 Monitor 模式
+## 二、关键设计事实
 
-**文件**：`components/esp_lcd_touch_ft6x36/esp_lcd_touch_ft6x36.c`
-
-1. 新增寄存器宏
-   ```c
-   #define FT62XX_REG_MONITORCTRL 0x86 // ID_G_CTRL: allow(0x01, default)/forbid(0x00) auto-enter Monitor mode
-   ```
-2. `touch_ft6x36_init()` 中，**在通过 Vendor / 芯片 ID 校验之后、设置门限之前**写入
-   ```c
-   ret |= touch_ft6x36_i2c_write(tp, FT62XX_REG_MONITORCTRL, 0x00);
-   ```
-   紧随其后**回读并打印**（便于验证，0x86 不在 0x00~0x0F 的寄存器 dump 范围内）：
-   ```
-   FT6x36: Monitor ctrl (0x86) = 0x00 (expect 0x00)
-   ```
-
-**为什么放这个位置**：FT6336U 规格规定**复位后必定回到 Active**（串口开放），此时才能写入；
-且必须赶在"无触摸满 `0x87`（固件默认 30 秒）自动进 Monitor"之前 —— 初始化在几毫秒内执行，时间上远早于该窗口。
-
-**为什么这是治本**：
-```
-任何复位 → 芯片必回 Active → 初始化写 0x86=0x00 → 芯片永不自动进 Monitor
-         → I²C 永不关闭 → 软复位后读 ID 依然成功 → 不会再出现崩溃重启死循环
-```
-且具**自我加固**性：软复位不复位芯片，`0x86` 仍为 0（寄存器在芯片内，掉电才丢），下次初始化再写一遍。
-
-**代价 / 待定项（后续是否优化由你决定，本文件只记录）**：
-- 芯片不再自动休眠，**静态功耗上升**；
-- 那句早先加的"读 ID 前先写 `0x00=0x00`"的**预写**已被规格证伪（Monitor 下串口关闭，写不进去），**留着无害但属白写**，可删；
-- 是否上板实测 `0x86=0x00` 确实阻止了自动进入 Monitor，见下"验证"。
-
-**验证方法（诚实说明局限）**：
-- ✅ **能证明的**：日志出现 `Monitor ctrl (0x86) = 0x00 (expect 0x00)` → 写入生效（若读到 `0x01` 说明没写进去，回报）。
-- ⚠️ **证明不了的**：*"静置几分钟后触摸仍正常"* —— 因为规格里 Monitor 模式下"检测到触摸立即回 Active"，**不做这个修复本来也能用**。
-- 要严格证明"确实不再进入 Monitor"，需**静置超过 30 秒后做一次软复位**（需要临时加 `esp_restart()` 钩子）；
-  否则只能靠**长期使用观察**：不再出现"烧录/软复位后触摸失效"即算达标。
-- 改动在组件源码里，会触发该组件重编，**需重新编译烧录**。
+- 触摸：FT6336U，I2C1 0x38，INT=GPIO10（事件驱动），驱动写 `0x86=0x00` 禁止自动 Monitor。
+- 触摸坐标：`x_max=320` / `y_max=480` / `swap_xy=1` / `mirror_x=0` / `mirror_y=1`。
+- 触摸阈值：20（芯片上电默认 15；组件默认 48）。
+- LCD：ST7796S，SPI3 80 MHz，480×320，RGB565，LVGL 15 行双缓冲（28.8 KB）。
+- 摄像头：GC0308 DVP，QVGA 320×240 RGB565，2 帧缓冲在 PSRAM。
+- 音频：ES8311 DAC + ES7210 ADC，I2S 24 kHz，PCA9557 P1 功放使能。
+- 共享 I2C1：PCA9557 0x19 / ES8311 0x18 / ES7210 0x82 / FT6336U 0x38 / QMI8658A 0x6A。
+- 分区：双 6 MB OTA；`model` 960 KB（ESP-SR）；`pedestrian_det` 1 MB（esp-dl）。
+- 巴法云：`bemfa.com:9501`，clientId=用户私钥，主题只能字母数字。
 
 ---
 
-## 三、崩溃重启死循环的完整根因链（已由数据手册**定论**）
+## 三、已落地的关键修复（摘要）
 
-曾经的现象是"屏幕一直闪"。**那是崩溃重启循环，不是渲染抖动** —— 看到屏闪先查串口有没有 `Guru Meditation` / `Rebooting`，别往 LVGL 刷新周期上想（此前就误判过一次）。
-
-```
-无触摸满 30 秒（0x87 默认 0x1E）
-   → 芯片自动进 Monitor，串口整体关闭（规格 §2.3：serial port is closed…）
-   → 驱动 init 读回全 0x00（正常 Vendor ID 应为 0x11）→ 失败
-   → 驱动跳过错写句柄那步、且释放了自己的句柄
-   → 板级代码用了未初始化的局部句柄、又没检查返回值 → 野指针交给 lvgl_port_add_touch
-   → LoadProhibited → 重启 → 循环（循环期间没人碰屏幕，芯片更醒不过来）
-   → 只有按 SW1（拉低 EN，CTP_RST 与 EN 同源会一并复位触摸 IC）或断电才能恢复
-```
-
-**防御性写法（已落地，别再退回）**：① 触摸句柄必须初始化为 `nullptr`；② 必须检查 I²C 与 `esp_lcd_touch_new_i2c_touch()` 的返回值；③ 失败就**打印错误并跳过触摸注册**（优雅降级），绝不要把空/野句柄交给 LVGL。`assert(handle)` 挡不住这个问题（栈上垃圾值非 NULL）。
-
-**注意**：按 SW1 复位**不能**用来验证"软件自愈"，因为它会把触摸 IC 一起复位（`CTP_RST` 与 `EN` 同源）——实验等于没做。
+| 问题 | 修复 | 详细 |
+| --- | --- | --- |
+| 二次唤醒一直等待响应 | `goodbye` 分支 + `Schedule()` 优雅关闭 + 8 s/30 s 静默兜底 | TROUBLESHOOTING §1 |
+| 拍照后预览卡死 | `fb_mutex_` 保护 + 三条路径归还 `fb_` + 排水再 join | §2 |
+| 巴法云/OTA 随机失败 | 云上报延迟 15 s + 失败重试 | §3 |
+| `car_cloud` 栈溢出 | 栈 2560 → 5120 B + 高水位日志 | §4 |
+| WebSocket 握手超时 | 回调注册先于 `tcp_->Send()` + 失败位 | §5 |
+| 触摸 Monitor 崩溃循环 | 写 `0x86=0x00` + 句柄空检查 + 失败跳过注册 | §6 |
+| 全屏滚动卡顿 | 拆页 + 禁滚动 + 15 行双缓冲 | §7 |
+| 触摸间歇失效 | 缓冲减半 + 中断驱动 | §8 |
+| AFE 溢出刷屏 | Opus 优先级 2→4 + PSRAM 栈兜底 | §9 |
+| MQTT 连接风暴 | 不频繁重建，仅首次/长期断线重连 | §10 |
 
 ---
 
-## 四、卡顿的结构性根因与已完成的改造（已上板验证正常）
+## 四、诊断开关
 
-- 根因：**整页滚动的脏区就是整屏**。480×320×2 = **307,200 B/帧**；SPI 80MHz 下纯传输 ≈ **30.7ms**，实测帧时间约 40ms、FPS 只有 **26~30**，其中传输占约 77%（渲染仅约 9ms）。→ **帧率被 SPI 带宽卡死**，调任务优先级 / 缓冲行数 / 刷新周期都救不回来。
-- 改造：把车载界面拆成**两个独立屏幕**（数据页 / 摄像头页），两页各自 `lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE)`，**取消滚动** → 每帧脏区从 307KB 降到几 KB 量级 → 卡顿从结构上消失。
-- 数据页布局：顶部通栏车辆状态 + 中部左右两栏（环境数据 ‖ 人员检测）+ 底部通栏告警。
-- 摄像头页：4:3 预览占位（**300×225**，不是 320×240 —— 后者加按钮行会超出 320 高度）+ 三颗按钮横排。
-- **内部 RAM 很紧，别在上面做加法**：稳态 free ≈ 32~33KB，**全周期最低仅 9~17KB** 且随网络重试波动。LVGL 绘制缓冲（30 行双缓冲 = 57.6KB）**必须留在内部 DMA RAM**，**不要挪去 PSRAM**（PSRAM 更慢且不减传输时间）。缓冲字节数 = `宽 × 行数 × 2 ×（双缓冲?2:1）`。
-
----
-
-## 五、待办 / 下一步可选方向
-
-1. **上板烧录验证**（板子插标 UART 的 Type-C 口，选 USB-SERIAL CH340 那个串口）—— 固件已于 2026-10-16 重新编译通过（0 error，触摸驱动 `.obj` 已重编），只差烧录后确认日志出现 `Monitor ctrl (0x86) = 0x00 (expect 0x00)`
-2. **长期观察**是否还会出现"烧录/软复位后触摸失效"（若不出现即达标本项修复）
-3. 可选：删掉那句已被规格证伪的"预写 `0x00=0x00`"
-4. 可选：评估 `0x86=0x00` 带来的静态功耗上升是否可接受
-5. 可选：摄像头页接入真实画面 —— 按 **4:3** 定尺寸（GC0308 输出 640×480）
-6. 可选：若还想提帧率，只能走"减少每帧字节"（继续缩小脏区）或"SPI 提频"；注意 ST7796S 规格写时钟上限 ≈15MHz，**80MHz 已属超规格但实测可用**，100MHz 未实测
-
-> **构建提示（2026-10-16 实测）**：本机 `ccache` 曾挂死 —— 进程 35 分钟只烧 ~35s CPU、无 gcc 子进程、目标 `.obj` 时间戳不变。
-> 遇到这种"卡在某个文件却毫无进展"的症状，先设 `CCACHE_DISABLE=1` / `IDF_CCACHE_ENABLE=0` 禁用 ccache 重跑，不要傻等；禁用后全量重编只需数分钟。
->
-> **版本库提示**：`components/` 原先被 `.gitignore` 整体忽略，导致 `car_monitor` 与触摸驱动长期不在版本库内；
-> 2026-10-16 已改为只忽略 `managed_components/`，并把两者连同本文件纳入提交。
+| 开关 | 位置 | 用途 |
+| --- | --- | --- |
+| `kEnableImuMotion` | `main/application.cc` | 关闭 IMU，二分触摸/唤醒问题 |
+| `kEnableCloudUpload` | `main/application.cc` | 关闭云上报，二分内存/OTA |
+| `kEnablePersonDetect` | `main/car_person_detect.cc` | 关闭推理，二分 CPU/PSRAM 抢占 |
+| `kDumpModelMemory` | `main/car_person_detect.cc` | 打印 esp-dl 逐层内存 |
+| `kLogEveryDetection` | `main/car_person_detect.cc` | 每次检测打印框/分数 |
 
 ---
 
-## 六、关键文件索引
+## 五、构建与烧录提示
+
+- 目标：ESP32-S3，ESP-IDF 5.5.3，Flash 16 MB QIO，PSRAM Octal 80 MHz。
+- 应用固件约 5.86 MB；首次烧录需写 `model` 与 `pedestrian_det` 两个模型分区。
+- 本机 `ccache` 曾挂死：若长时间卡在某个 `.obj` 且无 gcc 子进程，
+  设 `CCACHE_DISABLE=1` / `IDF_CCACHE_ENABLE=0` 后重跑，不要傻等。
+- CH340K 串口不稳定时，可改用板载原生 USB 口烧录。
+- 软复位不会给触摸 IC 断电；触摸进入 Monitor 时需整板断电或按 SW1（CTP_RST 与 EN 同源）。
+
+---
+
+## 六、managed_components 本地补丁记录
+
+> `managed_components/` 被 `.gitignore` 忽略，删除目录重新拉取依赖会还原上游代码，
+> 下列补丁会丢失，必须记录。
+
+| 日期 | 文件 | 补丁 | 原因 |
+| --- | --- | --- | --- |
+| 2026-10-21 | `78__esp-ml307/src/web_socket.cc` | `OnStream()` / `OnDisconnected()` 注册与 `xEventGroupClearBits()` 移到 `tcp_->Send(request)` 之前 | 服务端 101 可能在回调注册前到达，`ReceiveTask` 因 `stream_callback_` 为空丢数据，表现为 10 s 握手超时 |
+| 2026-10-22 | 同上 | `OnDisconnected` 在 `!handshake_completed_` 时置 `HANDSHAKE_FAILED_BIT` | 握手期服务端主动断开时旧代码不置失败位，只能白等 10 s |
+
+---
+
+## 七、上板自测记录（2026-10-22）
+
+| # | 项目 | 结果 |
+| --- | --- | --- |
+| 1 | 冷启动无重启循环 | PASS |
+| 2 | 三页切换 / 数据页刷新 | PASS |
+| 3 | 触摸 `0x86=0x00` / 连续点击 | PASS |
+| 4 | 摄像头预览 fps | PASS |
+| 5 | 人员检测模型加载 / 推理 | PASS |
+| 6 | 唤醒 → 对话 → TTS → Idle | PASS |
+| 7 | 二次唤醒 | PASS |
+| 8 | OTA 版本检查 | PASS |
+| 9 | 巴法云 env/state/online | PASS |
+
+> 判定以串口日志为准；云端周期连续性建议在长时间运行场景继续观察。
+
+---
+
+## 八、关键文件索引
 
 | 类别 | 文件 |
 | --- | --- |
-| 屏幕管理 | `main/screen_manager.h` / `.cc`（三页枚举与切换） |
-| 界面接线 | `main/car_ui_helper.h` / `.cc`（按钮回调挂摄像头页 / 数据页 500ms 刷新） |
-| 数据页 | `components/car_monitor/car_ui.h` / `.cc`（两栏布局、禁滚动） |
-| 摄像头页 | `components/car_monitor/car_camera_ui.h` / `.cc`（4:3 占位 + 三颗按钮） |
-| 共用配色 | `components/car_monitor/car_ui_colors.h` |
-| **触摸驱动（本次改动）** | `components/esp_lcd_touch_ft6x36/esp_lcd_touch_ft6x36.c` |
-| 板级外设配置 | `main/boards/grw-esp32s3-board/grw_esp32s3_board.cc`（I²C / LCD / 触摸 / 摄像头 / 按键） |
-| 全局配置 | `sdkconfig`（生成物）+ `sdkconfig.defaults`（固化） |
-| 项目文档 | `docs/SCREEN_MANAGER_USAGE.md`、`docs/SW3_SCREEN_SWITCH_GUIDE.md`、`docs/CAR_UI_INTEGRATION.md` |
-| 板级事实 / 诊断 | 技能 `esp32s3-dev` → `references/board-hardware.md`、`troubleshooting.md`、`s3-config.md` |
+| 应用启动/状态机 | `main/application.cc` / `.h` |
+| 板级初始化 | `main/boards/grw-esp32s3-board/grw_esp32s3_board.cc` |
+| 引脚定义 | `main/boards/grw-esp32s3-board/config.h` |
+| 业务/快照 | `components/car_monitor/car_monitor.cc` / `car_snapshot.h` |
+| UI | `components/car_monitor/car_ui.cc` / `car_camera_ui.cc` |
+| 屏幕管理 | `main/screen_manager.cc` |
+| UI/预览接线 | `main/car_ui_helper.cc` |
+| 人员检测 | `main/car_person_detect.cc` |
+| 巴法云 | `main/car_cloud.cc` |
+| 摄像头驱动 | `main/boards/common/esp32_camera.cc` |
+| 音频 | `main/audio/` |
+| 分区表 | `partitions.csv` |
+
+---
+
+## 九、下一步
+
+1. 接真实 DHT11/光照传感器，启用温度/湿度告警；
+2. 触摸稳定后恢复摄像头页按钮；
+3. 观察巴法云 5 s 周期长时间连续性；
+4. 如需继续提帧率，评估绕开 `esp_lcd` 的 PSRAM DMA 通路；
+5. 评估应用固件 93% 占槽的资源裁剪方案。

@@ -222,8 +222,10 @@ bool CarCloud::Start(uint32_t state_interval_ms, uint32_t online_interval_ms) {
     s_online_interval_ms = online_interval_ms;
 
     // 钉 CPU0 / 优先级 2：低于预览(3)，高于人员检测(1)；不占 CPU1（音频/AFE/wakenet 所在核）
-    // 栈取 2560B（原先 4096B）：本板内部 RAM 是唯一瓶颈，云上报只做 JSON 拼装 + publish，不需要更大栈
-    BaseType_t ret = xTaskCreatePinnedToCore(TaskFunc, "car_cloud", 2560, nullptr, /*优先级*/ 2,
+    // 栈取 5120B：2560B 实测会在 NVS 读写 + esp_mqtt_client_init 这条深调用链上触发栈溢出，
+    //             表现为拿到 IP 后立刻 "A stack overflow in task car_cloud"，整机反复重启。
+    //             4096B 可用但余量偏薄，多给 1KB 内部 RAM 换稳定；内部 RAM 总量只有约 195KB 可用。
+    BaseType_t ret = xTaskCreatePinnedToCore(TaskFunc, "car_cloud", 5120, nullptr, /*优先级*/ 2,
                                              &s_task, /*CPU0*/ 0);
     if (ret != pdPASS) {
         s_task = nullptr;
@@ -356,7 +358,9 @@ void CarCloud::TaskFunc(void* arg) {
                 // 注意：Connect() 内部最多阻塞 10s 等连接事件
                 if (mqtt->Connect(kHost, kPort, uid, "", "")) {
                     ever_connected = true;
-                    ESP_LOGI(TAG, "巴法云已连接");
+                    // 到这里已走过 NVS + esp_mqtt_client_init 的最深路径，打印栈余量便于确认是否还需加大
+                    ESP_LOGI(TAG, "巴法云已连接（任务栈余量 %u B）",
+                             (unsigned)uxTaskGetStackHighWaterMark(nullptr));
                 } else {
                     ESP_LOGW(TAG, "巴法云连接失败（交由 esp-mqtt 自动重连，%u s 后再兜底）",
                              (unsigned)(kReconnectRetryMs / 1000));

@@ -78,13 +78,40 @@ bool AfeWakeWord::Initialize(AudioCodec* codec) {
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
     
     afe_iface_ = esp_afe_handle_from_config(afe_config);
+    if (afe_iface_ == nullptr) {
+        ESP_LOGE(TAG, "AFE handle 获取失败");
+        return false;
+    }
     afe_data_ = afe_iface_->create_from_config(afe_config);
+    if (afe_data_ == nullptr) {
+        ESP_LOGE(TAG, "AFE 创建失败（internal free=%u largest=%u）",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        return false;
+    }
 
-    xTaskCreate([](void* arg) {
+    auto detection_task = [](void* arg) {
         auto this_ = (AfeWakeWord*)arg;
         this_->AudioDetectionTask();
         vTaskDelete(NULL);
-    }, "audio_detection", 4096, this, 3, nullptr);
+    };
+    BaseType_t ret = xTaskCreate(detection_task, "audio_detection", 4096, this, 3, nullptr);
+    if (ret != pdPASS) {
+        // 内部 RAM 紧张时，4KB 连续块可能分配失败。若这里静默失败：
+        //   - 不会出现 "Audio detection task started" 日志
+        //   - 没人调用 fetch()，AFE(FEED) 环缓冲会持续 full
+        //   - 表现为唤醒词完全失效（很容易误判成网络/内存不足）
+        // 因此失败时改用 PSRAM 栈重试；该任务只做 fetch/存音频，不写 flash。
+        ESP_LOGW(TAG, "audio_detection 内部栈创建失败（free=%u largest=%u），改用 PSRAM 栈重试",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        ret = xTaskCreatePinnedToCoreWithCaps(detection_task, "audio_detection", 4096, this, 3,
+                                              nullptr, tskNO_AFFINITY, MALLOC_CAP_SPIRAM);
+    }
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create audio detection task");
+        return false;
+    }
 
     return true;
 }

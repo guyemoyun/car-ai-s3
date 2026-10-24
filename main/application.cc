@@ -63,6 +63,9 @@
 
 #define TAG "Application"  ///< ESP日志标签
 
+// 巴法云延迟启动定时器：失败后由回调自行重装重试，成功后不再重装（句柄置空）
+static esp_timer_handle_t s_cloud_start_timer = nullptr;
+
 
 /**
  * @brief 设备状态字符串映射表
@@ -96,6 +99,14 @@ static const char* const STATE_STRINGS[] = {
  * 所以手机会话/跟话不会因此被截断；用户说完这一轮后 8s 无话即结束会话。
  */
 static constexpr int kListeningIdleTimeoutSec = 8;
+
+/**
+ * Realtime 模式（本板 AEC 常开时的默认监听模式）静默兜底时长。
+ * 此前 Realtime 模式没有任何本地逃生：一旦发送链路死亡/服务端沉默，
+ * 设备会永久停在"聆听中"。30s 无 VAD 兜底回 Idle；正常对话中状态会在
+ * Listening↔Speaking 间交替、每次切换都会清零计数，不受影响。
+ */
+static constexpr int kRealtimeIdleTimeoutSec = 30;
 
 /**
  * @brief 构造函数
@@ -655,12 +666,6 @@ void Application::Start() {
                     ESP_LOGE(TAG, "Failed to initialize CarUIHelper");
                 }
 
-                // 车载监测测试任务只用于每 5 秒打印一次状态日志（界面已能显示同样数据），
-                // 为腾出内部 RAM（约 4KB 任务栈）暂时停用。需要恢复时取消下面注释即可。
-                // extern bool start_car_monitor_test_task();
-                // if (start_car_monitor_test_task()) {
-                //     ESP_LOGI(TAG, "CarMonitor test task started");
-                // }
             }
         }
     }
@@ -720,14 +725,44 @@ void Application::Start() {
     // 读快照上报 env/state/online（5s/30s），告警事件 1s 内上报并做 32 条有界补发。
     // 必须在 StartNetwork() 之后（Wi-Fi 已就绪），失败只告警、不阻塞启动。
     //
-    // 说明：此前为二分排查"唤醒后无法连接小智服务"曾临时置 false；该故障最终证实是
-    // LCD 排线接触不良引起的 I2C 卡死重启循环，与云上报占内存无关，故恢复开启。
-    // 若之后再次出现"无法连接服务"且 [DIAG] internal_heap 明显偏低，可临时置 false 复测。
+    // 【延迟 15s 启动】实测若在启动序列里直接 Start，其 MQTT 客户端初始化（任务栈 +
+    // 连接缓冲，数 KB 内部 RAM）会与 PersonDetect 模型加载（瞬时占用 21KB，最低水位
+    // 仅 4047B）和 OTA 版本检查（TLS 需 ~20KB，其中 16KB 必须是连续块）挤在同一窗口，
+    // 导致 OTA 检查大多数失败、AFE 检测任务创建偶发失败（4KB 连续块分配失败）。
+    // 改为一次性 esp_timer 延迟启动（此刻系统已过 OTA/模型/AFE 初始化，进入稳态）。
+    //
+    // 【诊断开关】kEnableCloudUpload = false 可整体停用云上报（二分排查用）。
     constexpr bool kEnableCloudUpload = true;
-    if (kEnableCloudUpload && CarCloud::Start(5000, 30000)) {
-        ESP_LOGI(TAG, "Car cloud task started");
-    } else {
-        ESP_LOGW(TAG, "Car cloud task NOT started (other features unaffected)");
+    constexpr uint32_t kCloudStartDelaySec = 15;
+    if (kEnableCloudUpload) {
+        const esp_timer_create_args_t cloud_start_timer_args = {
+            .callback = [](void* /*arg*/) {
+                // 失败自动重试：第一次会话/拍照期间内部 RAM 紧张，任务创建可能失败；
+                // 单次机会会让云上报整次开机失效，因此失败后自行重装 15s 再试。
+                // 成功后不再重装（一次性定时器触发完毕自然休眠，代价仅一个句柄）。
+                if (CarCloud::Start(5000, 30000)) {
+                    ESP_LOGI(TAG, "Car cloud task started (delayed)");
+                    s_cloud_start_timer = nullptr;
+                } else {
+                    ESP_LOGW(TAG, "Car cloud start failed (busy/low memory), retry in 15 s");
+                    if (s_cloud_start_timer != nullptr) {
+                        esp_timer_start_once(s_cloud_start_timer, 15ULL * 1000000ULL);
+                    }
+                }
+            },
+            .arg = nullptr,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "cloud_start",
+            .skip_unhandled_events = true,
+        };
+        if (esp_timer_create(&cloud_start_timer_args, &s_cloud_start_timer) == ESP_OK) {
+            esp_timer_start_once(s_cloud_start_timer, (uint64_t)kCloudStartDelaySec * 1000000ULL);
+            ESP_LOGI(TAG, "Car cloud upload scheduled to start in %u s (retry on failure)",
+                     (unsigned)kCloudStartDelaySec);
+        } else {
+            ESP_LOGW(TAG, "Failed to create cloud start timer (cloud upload disabled this boot)");
+            s_cloud_start_timer = nullptr;
+        }
     }
 
     // OTA版本检查和设备激活
@@ -875,6 +910,18 @@ void Application::Start() {
                 ESP_LOGW(TAG, "Invalid custom message format: missing payload");
             }
 #endif
+        } else if (strcmp(type->valuestring, "goodbye") == 0) {
+            // 服务端结束会话（如用户说"拜拜"后）：此刻 TCP 还活着，是发送优雅 close 帧
+            // 的最后窗口。主动 CloseAudioChannel() 让服务端立即释放会话，避免残留会话
+            // 拒绝下一次连接 —— 此前缺失本分支，第二次唤醒会撞上服务端残留会话，
+            // 表现为握手成功但 server hello 10 秒无响应（"等待响应超时"）。
+            // 必须经 Schedule 切到主事件循环再关：本回调运行在 websocket 自己的
+            // ssl_receive 任务里，直接销毁 websocket 会造成 use-after-free 和自等死锁。
+            // 关闭后 on_audio_channel_closed_ 会把状态拉回 Idle（重开唤醒词检测）。
+            ESP_LOGI(TAG, "Server requested goodbye, closing audio channel");
+            Schedule([this]() {
+                protocol_->CloseAudioChannel();
+            });
         } else {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
         }
@@ -988,15 +1035,26 @@ void Application::MainEventLoop() {
             // 本工程退出 Listening 的路径只有"服务端关闭 WebSocket"，而 Listening 期间
             // 唤醒词检测是关的 —— 服务端一旦不关会话，设备就永远唤不醒。这里用本地
             // VAD 静音计时兜底，保证设备总能回到可再次唤醒的状态。
-            // （Realtime / ManualStop 不做此事：它们各自有明确的会话语义）
-            if (device_state_ == kDeviceStateListening && listening_mode_ == kListeningModeAutoStop) {
-                if (audio_service_.IsVoiceDetected()) {
+            // AutoStop 8s；Realtime 30s（服务端沉默/发送链路死亡时唯一的本地出口）；
+            // ManualStop 不做兜底（用户手动控制会话）。
+            if (device_state_ == kDeviceStateListening) {
+                int timeout_sec = 0;  // 0 = 不做静默兜底
+                if (listening_mode_ == kListeningModeAutoStop) {
+                    timeout_sec = kListeningIdleTimeoutSec;
+                } else if (listening_mode_ == kListeningModeRealtime) {
+                    timeout_sec = kRealtimeIdleTimeoutSec;
+                }
+                if (timeout_sec > 0) {
+                    if (audio_service_.IsVoiceDetected()) {
+                        listening_idle_ticks_ = 0;
+                    } else if (++listening_idle_ticks_ >= timeout_sec) {
+                        listening_idle_ticks_ = 0;
+                        ESP_LOGI(TAG, "监听静默 %d 秒，自动停止监听 -> IDLE（唤醒词检测重新开启）",
+                                 timeout_sec);
+                        StopListening();
+                    }
+                } else {
                     listening_idle_ticks_ = 0;
-                } else if (++listening_idle_ticks_ >= kListeningIdleTimeoutSec) {
-                    listening_idle_ticks_ = 0;
-                    ESP_LOGI(TAG, "监听静默 %d 秒，自动停止监听 -> IDLE（唤醒词检测重新开启）",
-                             kListeningIdleTimeoutSec);
-                    StopListening();
                 }
             } else {
                 listening_idle_ticks_ = 0;
