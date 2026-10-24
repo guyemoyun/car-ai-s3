@@ -5,6 +5,7 @@ build/
 .claude/
 .gitignore/
 .trae/
+.trae-html-share-packages/
 .github/
 .devcontainer/
 sdkconfig.old
