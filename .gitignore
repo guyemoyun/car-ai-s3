@@ -2,6 +2,10 @@ tmp/
 managed_components/
 build/
 .vscode/
+.claude/
+.gitignore/
+.trae/
+.github/
 .devcontainer/
 sdkconfig.old
 sdkconfig
